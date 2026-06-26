@@ -139,11 +139,19 @@ def fetch_all_data(force: bool = False) -> dict[str, Any]:
                 except (ValueError, AttributeError):
                     pass
 
+            def _safe_int(val):
+                if val is None or val == "null" or val == "":
+                    return 0
+                try:
+                    return int(val)
+                except (ValueError, TypeError):
+                    return 0
+
             match = {
                 "id": g.get("id"),
                 "team1": teams.get(g.get("home_team_id", ""), g.get("home_team_name_en", "TBD")),
                 "team2": teams.get(g.get("away_team_id", ""), g.get("away_team_name_en", "TBD")),
-                "score": [int(g.get("home_score", 0)), int(g.get("away_score", 0))],
+                "score": [_safe_int(g.get("home_score")), _safe_int(g.get("away_score"))],
                 "status": status,
                 "live_minute": minute,
                 "group": f"Group {group_letter}" if is_group else "",
