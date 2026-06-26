@@ -7,6 +7,7 @@ import random
 from pathlib import Path
 import threading
 import time
+import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
@@ -74,8 +75,9 @@ def _get(path: str) -> dict:
         r.raise_for_status()
         return r.json()
     except Exception:
-        return {}
-
+        print("FETCH_ALL_DATA FAILED")
+        traceback.print_exc()
+        raise
 
 def fetch_all_data(force: bool = False) -> dict[str, Any]:
     global _last_fetch_time, _last_api_updated
