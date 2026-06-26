@@ -180,7 +180,7 @@ tr.highlighted td:first-child{padding-left:5px}
         <div class="tip-rich-row"><span class="dot" style="background:#f87171"></span><span><strong>Red</strong> — simulated advance % swings 20+ points across outcomes, or country is directly playing</span></div>
         <div class="tip-rich-row"><span class="dot" style="background:#fb923c"></span><span><strong>Orange</strong> — swing of 8–20 points; result meaningfully shifts odds</span></div>
         <div class="tip-rich-row"><span class="dot" style="background:#fbbf24"></span><span><strong>Yellow</strong> — swing of 2–8 points; minor indirect effect</span></div>
-        <div class="tip-rich-row"><span class="dot" style="background:#666"></span><span><strong>Grey</strong> — negligible impact on this team's chances</span></div>
+        <div class="tip-rich-row"><span class="dot" style="background:#666"></span><span><strong>Grey</strong> — negligible impact; these matches are hidden from this list</span></div>
         "Rank N/12" assumes all other matches are frozen — accurate for the very next match, less so further out. "sim %" reflects thousands of full-tournament simulations and stays meaningful regardless of schedule.
         Click a match header to collapse its outcome table.
     </div>
@@ -442,10 +442,12 @@ function renderKey(data) {
 // and whether to show the live score + minute in the header.
 function renderMatchList(matches, elId, emptyMsg, isLiveList) {
     const el = document.getElementById(elId);
-    const keys = (matches || []).slice().sort((a, b) => {
-        const order = {red:0, orange:1, yellow:2, grey:3};
-        return (order[a.severity]??3) - (order[b.severity]??3);
-    }).slice(0, 15);
+    const keys = (matches || []).slice()
+        .filter(m => isLiveList || m.severity !== "grey")
+        .sort((a, b) => {
+            const order = {red:0, orange:1, yellow:2, grey:3};
+            return (order[a.severity]??3) - (order[b.severity]??3);
+        }).slice(0, 15);
     if (!keys.length) {
         el.innerHTML = `<div style="color:#666;font-size:0.9rem">${emptyMsg}</div>`;
         return;
