@@ -267,50 +267,7 @@ def apply_match_outcome(table: list[dict], match: dict, outcome: str, score1: in
 
 
 def find_remaining(group: str, matches: list[dict]) -> list[dict]:
-    """Return matches that are truly upcoming (not finished, not currently live)."""
-    return [m for m in matches if m.get("group") == group and m.get("status") == "upcoming"]
-
-
-def find_live(group: str, matches: list[dict]) -> list[dict]:
-    """Return matches that are currently in progress."""
-    return [m for m in matches if m.get("group") == group and m.get("status") == "live"]
-
-
-def _apply_live_score(table: dict, match: dict) -> None:
-    """Apply a live match's current score to a mutable standings dict in-place.
-
-    The API standings snapshot may already include partial live-match stats,
-    but we can't rely on that — so we apply the live score unconditionally
-    only when the team has not yet been credited with the extra played game.
-    We detect this by checking if the team's `p` (played) count in the
-    snapshot already reflects this match (i.e. it's already been counted),
-    which would mean the API live-updated the standings mid-game. If the
-    played count hasn't moved yet, we add the goals and result ourselves.
-
-    In practice, most tournament APIs update standings only on match finish,
-    so we almost always need to apply the live score here.
-    """
-    t1, t2 = match["team1"], match["team2"]
-    s1, s2 = match["score"][0], match["score"][1]
-
-    outcome = "1" if s1 > s2 else ("2" if s2 > s1 else "X")
-
-    for name, gf, ga in [(t1, s1, s2), (t2, s2, s1)]:
-        if name not in table:
-            continue
-        row = table[name]
-        row["p"] += 1
-        row["gf"] += gf
-        row["ga"] += ga
-        row["gd"] = row["gf"] - row["ga"]
-        if outcome == "1" and name == t1:
-            row["w"] += 1; row["pts"] += 3
-        elif outcome == "2" and name == t2:
-            row["w"] += 1; row["pts"] += 3
-        elif outcome == "X":
-            row["d"] += 1; row["pts"] += 1
-        else:
-            row["l"] += 1
+    return [m for m in matches if m.get("group") == group and m.get("status") != "finished"]
 
 
 # ─── ANALYSIS ───────────────────────────────────────────────────────────────
@@ -375,15 +332,11 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
     ("given this match goes this way, how often does team T advance?") be
     derived from the *same* simulation run, without resampling anything.
     """
-    remaining_by_group: defaultdict[str, list] = defaultdict(list)
-    live_by_group: defaultdict[str, list] = defaultdict(list)
+    remaining_by_group = defaultdict(list)
     for m in matches:
-        g = m.get("group", "")
-        if m.get("status") == "live":
-            live_by_group[g].append(m)
-        elif m.get("status") == "upcoming":
+        if m.get("status") != "finished":
+            g = m.get("group", "")
             remaining_by_group[g].append(m)
-        # "finished" matches are already baked into standings — skip them.
 
     locked = {g for g, tbl in standings.items() if all(r["p"] >= 3 for r in tbl)}
 
@@ -410,16 +363,12 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
                     all_thirds.append(table[2])
                 continue
             remaining = remaining_by_group.get(gname, [])
-            live = live_by_group.get(gname, [])
             sampled: dict[str, str] = {}
             for m in remaining:
                 sampled[str(m.get("id", ""))] = sample_result(rating(m["team1"]), rating(m["team2"]))
             if track_matches:
                 sim_sampled.update(sampled)
             cur_tbl = {r["team"]: dict(r) for r in table}
-            # Lock in current live scores — treat them as already decided.
-            for m in live:
-                _apply_live_score(cur_tbl, m)
             for m in remaining:
                 r1, r2 = rating(m["team1"]), rating(m["team2"])
                 g1, g2 = typical_score(sampled.get(str(m["id"]), "X"), r1, r2)
@@ -509,27 +458,11 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
 
 
 def compute_scenarios(standings: dict, matches: list[dict], country: str = "South Korea", mc_country_data: dict | None = None) -> dict:
-    # Apply live scores into a standings snapshot so scenario helpers see the
-    # correct current state rather than the pre-match snapshot.
-    live_standings: dict[str, list[dict]] = {}
-    for gname, table in standings.items():
-        live_matches_in_group = [m for m in matches if m.get("group") == gname and m.get("status") == "live"]
-        if live_matches_in_group:
-            tbl_copy = {r["team"]: dict(r) for r in table}
-            for m in live_matches_in_group:
-                _apply_live_score(tbl_copy, m)
-            live_standings[gname] = sorted(tbl_copy.values(), key=rank_key)
-        else:
-            live_standings[gname] = table
-    standings = live_standings  # shadow: all downstream helpers use this
-
     remaining_by_group = defaultdict(list)
     for m in matches:
-        if m.get("status") == "upcoming":
+        if m.get("status") != "finished":
             g = m.get("group", "")
             remaining_by_group[g].append(m)
-        # live matches are now baked into `standings` above; finished matches
-        # are already reflected in the original standings — skip both.
 
     locked = {g for g, tbl in standings.items() if all(r["p"] >= 3 for r in tbl)}
 
@@ -707,9 +640,32 @@ def compute_scenarios(standings: dict, matches: list[dict], country: str = "Sout
     }
 
 
-def compute_criticality(match: dict, standings: dict, country: str = "South Korea", advance_prob: float | None = None) -> str:
+def compute_criticality(match: dict, standings: dict, country: str = "South Korea", advance_prob: float | None = None, mc_conditional: dict | None = None) -> str:
     if advance_prob is not None and (advance_prob >= 100 or advance_prob <= 0):
         return "grey"
+
+    # Prefer MC-derived severity: the probability swing across outcomes is a
+    # much more reliable signal than static points/GD thresholds, especially
+    # for out-of-group matches where the threshold logic has poor visibility.
+    if mc_conditional and match.get("id") is not None:
+        cond = mc_conditional.get(str(match["id"]))
+        if cond:
+            pcts = [
+                bucket.get("advance_pct", {}).get(country)
+                for bucket in cond.values()
+                if bucket.get("n_sims", 0) >= 500  # ignore low-sample buckets
+            ]
+            pcts = [p for p in pcts if p is not None]
+            if len(pcts) >= 2:
+                swing = max(pcts) - min(pcts)
+                if swing >= 20:
+                    return "red"
+                elif swing >= 8:
+                    return "orange"
+                elif swing >= 2:
+                    return "yellow"
+                else:
+                    return "grey"
 
     country_group = None
     country_pos = None
@@ -1241,7 +1197,7 @@ def api_data():
     country_prob = mc.get("prob", 0)
     key_all = [m for m in matches if m.get("status") != "finished"]
     for m in key_all:
-        m["severity"] = compute_criticality(m, standings, country, country_prob)
+        m["severity"] = compute_criticality(m, standings, country, country_prob, mc_conditional)
 
     live_raw = [m for m in key_all if m.get("status") == "live"]
     key_upcoming = [m for m in key_all if m.get("status") != "live"]

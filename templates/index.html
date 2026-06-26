@@ -176,11 +176,12 @@ tr.highlighted td:first-child{padding-left:5px}
 <div class="card">
 <div class="card-title tip-rich">⏳ Key Upcoming Matches
     <div class="tip-rich-content">
-        Upcoming matches ranked by impact on the selected country.
-        <div class="tip-rich-row"><span class="dot" style="background:#f87171"></span><span>Country is playing, or a rival can directly overtake them</span></div>
-        <div class="tip-rich-row"><span class="dot" style="background:#fb923c"></span><span>A team could leapfrog them with a win</span></div>
-        <div class="tip-rich-row"><span class="dot" style="background:#fbbf24"></span><span>Indirect effect on standings</span></div>
-        "Rank N/12" assumes every other match stays exactly as it is today — accurate for the very next match, less so further out. "sim %" instead reflects thousands of simulated ways the rest of the tournament could go, so it stays meaningful for matches later in the schedule too.
+        Upcoming matches ranked by impact on the selected country, sorted by color.
+        <div class="tip-rich-row"><span class="dot" style="background:#f87171"></span><span><strong>Red</strong> — simulated advance % swings 20+ points across outcomes, or country is directly playing</span></div>
+        <div class="tip-rich-row"><span class="dot" style="background:#fb923c"></span><span><strong>Orange</strong> — swing of 8–20 points; result meaningfully shifts odds</span></div>
+        <div class="tip-rich-row"><span class="dot" style="background:#fbbf24"></span><span><strong>Yellow</strong> — swing of 2–8 points; minor indirect effect</span></div>
+        <div class="tip-rich-row"><span class="dot" style="background:#666"></span><span><strong>Grey</strong> — negligible impact on this team's chances</span></div>
+        "Rank N/12" assumes all other matches are frozen — accurate for the very next match, less so further out. "sim %" reflects thousands of full-tournament simulations and stays meaningful regardless of schedule.
         Click a match header to collapse its outcome table.
     </div>
 </div>
@@ -483,14 +484,16 @@ function renderScenarios(data) {
         el.innerHTML = '<div style="color:#666">No scenario data</div>';
         return;
     }
-    const fmt = (sc, label, icon, cls) => {
+    const fmt = (sc, label, icon, cls, isLikely) => {
         let rankHtml, advHtml;
         if (sc.status === "top2") {
             rankHtml = `<div class="scenario-rank green">Advances from top ${sc.position}</div>`;
             advHtml = `<div class="scenario-detail">✅ Advances</div>`;
         } else if (sc.status === "third") {
-            rankHtml = `<div class="scenario-rank ${cls}">Rank ${sc.rank}/12</div>`;
-            advHtml = `<div class="scenario-detail">${sc.adv ? "✅ Advances" : "❌ Eliminated"}</div>`;
+            const rankLabel = isLikely ? `Median rank ${sc.rank}/12` : `Rank ${sc.rank}/12`;
+            rankHtml = `<div class="scenario-rank ${cls}">${rankLabel}</div>`;
+            const probSuffix = isLikely && sc.prob != null ? ` (${sc.prob}% advance)` : "";
+            advHtml = `<div class="scenario-detail">${sc.adv ? "✅ Advances" : "❌ Eliminated"}${probSuffix}</div>`;
         } else {
             rankHtml = `<div class="scenario-rank">Not in contention</div>`;
             advHtml = `<div class="scenario-detail">❌ Eliminated</div>`;
@@ -501,9 +504,9 @@ function renderScenarios(data) {
         </div>`;
     };
     el.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap">
-        <div data-tip="Best possible rank if every result goes in this team's favor" style="flex:1;min-width:120px">${fmt(s.best,"Best Case","🌟","green")}</div>
-        <div data-tip="Most probable outcome based on each match's most likely result" style="flex:1;min-width:120px">${fmt(s.likely,"Most Likely","📊","yellow")}</div>
-        <div data-tip="Worst possible rank if every result goes against this team" style="flex:1;min-width:120px">${fmt(s.worst,"Worst Case","💀","red")}</div>
+        <div data-tip="Best possible rank if every remaining result goes this team's way" style="flex:1;min-width:120px">${fmt(s.best,"Best Case","🌟","green",false)}</div>
+        <div data-tip="Median rank across thousands of simulated tournaments — the same simulation behind the Advance Probability panel below, so this always agrees with that percentage" style="flex:1;min-width:120px">${fmt(s.likely,"Most Likely","📊","yellow",true)}</div>
+        <div data-tip="Worst possible rank if every remaining result goes against this team" style="flex:1;min-width:120px">${fmt(s.worst,"Worst Case","💀","red",false)}</div>
     </div>`;
 }
 
