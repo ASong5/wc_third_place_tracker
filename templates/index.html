@@ -71,17 +71,19 @@ tr.highlighted td:first-child{padding-left:5px}
 .outcome-rank.adv{color:#4ade80}
 .outcome-rank.elim{color:#f87171}
 .outcome-rank.top2{color:#22d3ee}
-.outcome-simbar-row{grid-column:1/-1;display:grid;grid-template-columns:1fr 50px;align-items:center;gap:8px;margin-top:2px;padding-bottom:2px}
-.outcome-simbar-track{position:relative;height:10px;background:#1a1a2e;border-radius:3px;overflow:visible}
+.outcome-simbar-row{grid-column:1/-1;display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;margin-top:2px;padding-bottom:2px}
+.outcome-simbar-track{position:relative;height:8px;background:#1a1a2e;border-radius:3px;overflow:visible}
 .outcome-simbar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:3px;transition:width .2s}
 .outcome-simbar-fill.high{background:#2f7d4f}
 .outcome-simbar-fill.mid{background:#a87a1f}
 .outcome-simbar-fill.low{background:#8a3636}
-.outcome-simbar-baseline{position:absolute;top:-2px;bottom:-2px;width:0;border-left:1.5px dashed #888;z-index:1}
-.outcome-simbar-pct{font-size:0.78rem;font-weight:600;text-align:right}
+.outcome-simbar-baseline{position:absolute;top:-2px;bottom:-2px;width:0;border-left:1.5px dashed #555;z-index:1}
+.outcome-simbar-labels{display:flex;gap:10px;align-items:center;white-space:nowrap}
+.outcome-simbar-pct{font-size:0.78rem;font-weight:600}
 .outcome-simbar-pct.high{color:#4ade80}
 .outcome-simbar-pct.mid{color:#fbbf24}
 .outcome-simbar-pct.low{color:#f87171}
+.outcome-simbar-freq{font-size:0.72rem;color:#555}
 
 /* ── GD strip (own matches only) ── */
 .gd-strip{margin-top:8px;padding-top:6px;border-top:1px solid #1a1a2a}
@@ -113,17 +115,9 @@ tr.highlighted td:first-child{padding-left:5px}
 .projected-table td{padding:3px 6px}
 .projected-table tr.selection td{color:#f0c040;font-weight:700}
 
-[data-tip]{position:relative;cursor:help}
-[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#111;color:#ddd;padding:6px 10px;border-radius:5px;font-size:0.75rem;z-index:100;border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,.5);pointer-events:none;font-weight:400;min-width:180px;max-width:min(90vw,400px);white-space:normal;text-align:left}
-[data-tip]:hover::before{content:"";position:absolute;bottom:calc(100% - 2px);left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#333;z-index:100;pointer-events:none}
-[data-tip].tip-below:hover::after{bottom:auto;top:calc(100% + 6px)}
-[data-tip].tip-below:hover::before{bottom:auto;top:calc(100% - 2px);border-top-color:transparent;border-bottom-color:#333}
-[data-tip].tip-left:hover::after{left:8px;transform:none}
-[data-tip].tip-left:hover::before{left:20px;transform:none}
-[data-tip].tip-right:hover::after{left:auto;right:8px;transform:none}
-[data-tip].tip-right:hover::before{left:auto;right:20px;transform:none}
+[data-floattip]{cursor:help}
 
-/* Rich tooltip: real HTML content (line breaks, colored dots) instead of the attr()-only [data-tip] mechanism */
+/* Rich tooltip: real HTML content (line breaks, colored dots) instead of the attr()-only [data-floattip] mechanism */
 .tip-rich{position:relative;cursor:help}
 .tip-rich .tip-rich-content{display:none;position:absolute;bottom:calc(100% + 6px);left:0;background:#111;color:#ddd;padding:8px 10px;border-radius:5px;font-size:0.75rem;z-index:100;border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,.5);font-weight:400;min-width:220px;max-width:min(90vw,360px);white-space:normal;text-align:left;line-height:1.5}
 .tip-rich:hover .tip-rich-content{display:block}
@@ -140,6 +134,7 @@ tr.highlighted td:first-child{padding-left:5px}
 </style>
 </head>
 <body>
+<div id="floatTip" style="display:none;position:fixed;z-index:9999;background:#111;color:#ddd;padding:7px 10px;border-radius:5px;font-size:0.75rem;border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,.5);max-width:320px;white-space:normal;line-height:1.5;pointer-events:none"></div>
 <div class="container">
 <header style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:12px">
 <div>
@@ -148,9 +143,9 @@ tr.highlighted td:first-child{padding-left:5px}
 </div>
 <div style="display:flex;gap:12px;align-items:center">
 <div style="display:flex;gap:8px;background:#1a1a3a;padding:4px 10px;border-radius:6px;border:1px solid #2a2a4a">
-<span data-tip="How strongly teams are weighted when simulating match outcomes" style="color:#888;font-size:0.8rem">Mode:</span>
-<label data-tip="Stronger teams (more points in tournament) are more likely to win remaining matches" style="cursor:pointer;font-size:0.85rem"><input type="radio" name="simMode" value="elo" onchange="setMode('elo')"> Elo</label>
-<label data-tip="Every match outcome (home win / draw / away win) is equally likely regardless of team strength" style="cursor:pointer;font-size:0.85rem"><input type="radio" name="simMode" value="equal" checked onchange="setMode('equal')"> Equal</label>
+<span data-floattip="How strongly teams are weighted when simulating match outcomes" style="color:#888;font-size:0.8rem">Mode:</span>
+<label data-floattip="Stronger teams (more points in tournament) are more likely to win remaining matches" style="cursor:pointer;font-size:0.85rem"><input type="radio" name="simMode" value="elo" onchange="setMode('elo')"> Elo</label>
+<label data-floattip="Every match outcome (home win / draw / away win) is equally likely regardless of team strength" style="cursor:pointer;font-size:0.85rem"><input type="radio" name="simMode" value="equal" checked onchange="setMode('equal')"> Equal</label>
 </div>
 <select id="countrySelect" onchange="selectCountry(this.value)"></select>
 </div>
@@ -160,9 +155,9 @@ tr.highlighted td:first-child{padding-left:5px}
 
 <div class="grid">
 <div class="card">
-<div class="card-title" data-tip="All 12 third-placed teams, sorted by Pts → GD → GF. Top 8 advance to the knockout stage. Click any team to track it.">3rd-Place Standings</div>
+<div class="card-title" data-floattip="All 12 third-placed teams, sorted by Pts → GD → GF. Top 8 advance to the knockout stage. Click any team to track it.">3rd-Place Standings</div>
 <table id="standingsTable">
-<thead><tr><th>#</th><th>Team</th><th>Pts</th><th>GD</th><th>GF</th><th>Group</th><th data-tip="Group matches still to play for this team" style="color:#888;font-size:0.7rem;cursor:help">Left</th></tr></thead>
+<thead><tr><th>#</th><th>Team</th><th>Pts</th><th>GD</th><th>GF</th><th>Group</th><th data-floattip="Group matches still to play for this team" style="color:#888;font-size:0.7rem;cursor:help">Left</th></tr></thead>
 <tbody id="standingsBody"><tr><td colspan="7"><div class="loading-text">Loading standings...</div></td></tr></tbody>
 </table>
 </div>
@@ -188,16 +183,16 @@ tr.highlighted td:first-child{padding-left:5px}
 <div id="keyMatches"><div class="loading-text">Loading matches...</div></div>
 </div>
 <div class="card" style="align-self:start">
-<div class="card-title" data-tip="Best, most likely, and worst possible rank for the selected team if remaining match results swing favorably or unfavorably.">📈 Scenarios</div>
+<div class="card-title" data-floattip="Best, most likely, and worst possible rank for the selected team if remaining match results swing favorably or unfavorably.">📈 Scenarios</div>
 <div id="scenarios"><div class="loading-text">Loading scenarios...</div></div>
 </div>
 </div>
 
 <div class="grid grid-full">
 <div class="card">
-<div class="card-title" data-tip="Monte Carlo simulation: thousands of random simulations of all remaining group matches, showing how often each rank is achieved.">📊 Advance Probability</div>
+<div class="card-title" data-floattip="Monte Carlo simulation: thousands of random simulations of all remaining group matches, showing how often each rank is achieved.">📊 Advance Probability</div>
 <div id="monteCarlo"><div class="loading-text">Computing probabilities...</div></div>
-<button class="simulate-btn" id="simulateBtn" onclick="runSimulate()" data-tip="Runs one random simulation of every remaining group match and shows the resulting 3rd-place table.">🎲 Simulate All Remaining Matches</button>
+<button class="simulate-btn" id="simulateBtn" onclick="runSimulate()" data-floattip="Runs one random simulation of every remaining group match and shows the resulting 3rd-place table.">🎲 Simulate All Remaining Matches</button>
 <div id="simulateResult"></div>
 </div>
 </div>
@@ -205,7 +200,8 @@ tr.highlighted td:first-child{padding-left:5px}
 
 <script>
 let currentCountry = "South Korea";
-let currentBaseline = null; // the selected team's unconditional advance % from the latest Monte Carlo run, used as the reference line in match outcome bars
+let currentBaseline = null;   // the selected team's unconditional advance % from the latest Monte Carlo run, used as the reference line in match outcome bars
+let currentTotalSims = 50000; // total MC iterations — used to compute per-outcome frequency width
 // track which panels are EXPANDED (default: all collapsed)
 let expandedPanels = new Set();
 
@@ -260,6 +256,7 @@ function togglePanel(id) {
 
 function render(data) {
     currentBaseline = (data.monte_carlo && typeof data.monte_carlo.prob === "number") ? data.monte_carlo.prob : null;
+    currentTotalSims = (data.monte_carlo && data.monte_carlo.total_sims) ? data.monte_carlo.total_sims : 50000;
     renderStatus(data);
     renderStandings(data);
     renderLive(data);
@@ -287,7 +284,7 @@ function renderStatus(data) {
             <div class="status-text ${cls[s.status]}">${escapeHtml(currentCountry)}</div>
             <div class="status-rank">${s.group} · ${rankStr}${d ? ` · ${d.pts}pts  GD ${d.gd >= 0 ? "+" : ""}${d.gd}  GF ${d.gf}` : ""}</div>
         </div>
-        <div class="status-prob" data-tip="How often this team finishes in the top 8 of 3rd-place teams across ${mc.total_sims || 50000} simulations">
+        <div class="status-prob" data-floattip="How often this team finishes in the top 8 of 3rd-place teams across ${mc.total_sims || 50000} simulations">
             <span class="${prob > 50 ? 'green' : prob > 20 ? 'yellow' : 'red'}" style="font-weight:600">${prob}%</span>
             <span style="color:#888"> advance</span>
             <div class="prob-bar"><div class="prob-fill" style="width:${Math.min(prob,100)}%;background:${prob > 50 ? '#4ade80' : prob > 20 ? '#fbbf24' : '#f87171'}"></div></div>
@@ -353,7 +350,10 @@ function outcomeRankHtml(res) {
 function simBarHtml(res) {
     if (!res || res.sim_advance_pct == null) return "";
     const pct = res.sim_advance_pct;
+    const n = res.sim_n || 0;
+    const freqPct = Math.min(n / currentTotalSims * 100, 100);
     const base = currentBaseline;
+
     let tier = "mid";
     if (base != null) {
         if (pct >= base + 10) tier = "high";
@@ -361,16 +361,25 @@ function simBarHtml(res) {
     } else {
         tier = pct >= 60 ? "high" : pct <= 25 ? "low" : "mid";
     }
+
     const baselineMarker = base != null
-        ? `<div class="outcome-simbar-baseline" style="left:${Math.min(Math.max(base,0),100)}%" title="Current baseline: ${base}% advance"></div>`
+        ? `<div class="outcome-simbar-baseline" style="left:${Math.min(Math.max(base,0),100)}%"></div>`
         : "";
+
+    const freqLabel = freqPct < 1 ? "<1%" : `~${freqPct.toFixed(0)}%`;
+    const baselineTip = base != null ? ` Dashed line marks overall advance odds (${base}%).` : "";
+    const tooltip = `Sim advance rate: ${pct}% — in the ${n.toLocaleString()} simulations where this outcome occurred, the team advanced ${pct}% of the time.${baselineTip}`;
+
     return `
-        <div class="outcome-simbar-row" data-tip="Share of simulations where this match went this way, and the team advanced overall (n=${(res.sim_n||0).toLocaleString()})">
+        <div class="outcome-simbar-row" data-floattip="${tooltip}">
             <div class="outcome-simbar-track">
                 <div class="outcome-simbar-fill ${tier}" style="width:${Math.min(Math.max(pct,0),100)}%"></div>
                 ${baselineMarker}
             </div>
-            <span class="outcome-simbar-pct ${tier}">${pct}%</span>
+            <div class="outcome-simbar-labels">
+                <span class="outcome-simbar-freq">${freqLabel} of sims</span>
+                <span class="outcome-simbar-pct ${tier}">${pct}% adv.</span>
+            </div>
         </div>`;
 }
 
@@ -506,9 +515,9 @@ function renderScenarios(data) {
         </div>`;
     };
     el.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap">
-        <div data-tip="Best possible rank if every remaining result goes this team's way" style="flex:1;min-width:120px">${fmt(s.best,"Best Case","🌟","green",false)}</div>
-        <div data-tip="Median rank across thousands of simulated tournaments — the same simulation behind the Advance Probability panel below, so this always agrees with that percentage" style="flex:1;min-width:120px">${fmt(s.likely,"Most Likely","📊","yellow",true)}</div>
-        <div data-tip="Worst possible rank if every remaining result goes against this team" style="flex:1;min-width:120px">${fmt(s.worst,"Worst Case","💀","red",false)}</div>
+        <div data-floattip="Best possible rank if every remaining result goes this team's way" style="flex:1;min-width:120px">${fmt(s.best,"Best Case","🌟","green",false)}</div>
+        <div data-floattip="Median rank across thousands of simulated tournaments — the same simulation behind the Advance Probability panel below, so this always agrees with that percentage" style="flex:1;min-width:120px">${fmt(s.likely,"Most Likely","📊","yellow",true)}</div>
+        <div data-floattip="Worst possible rank if every remaining result goes against this team" style="flex:1;min-width:120px">${fmt(s.worst,"Worst Case","💀","red",false)}</div>
     </div>`;
 }
 
@@ -536,10 +545,10 @@ function renderMonteCarlo(data) {
     const isElim = prob === 0 || (mc.note && (mc.note.includes("Eliminated") || mc.note.includes("Not in 3rd")));
     el.innerHTML = `
         <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-            <div data-tip="Percentage of simulations where this team finishes in the top 8 of 3rd-place teams"><span style="color:#888">Advance</span><br><span class="${probCls}" style="font-size:1.3rem;font-weight:700">${prob}%</span></div>
-            <div data-tip="Average rank across all simulations (lower is better)"><span style="color:#888">Expected Rank</span><br><span style="font-size:1.3rem;font-weight:700">${isElim ? "Eliminated" : mc.avg_rank+"/12"}</span></div>
-            <div data-tip="The middle rank: half the simulations finish above this, half below"><span style="color:#888">Median Rank</span><br><span style="font-size:1.3rem;font-weight:700">${isElim ? "Eliminated" : mc.median_rank+"/12"}</span></div>
-            <div data-tip="Number of random simulations run"><span style="color:#888">Simulations</span><br><span style="font-size:1.3rem;font-weight:700">${total.toLocaleString()}</span></div>
+            <div data-floattip="Percentage of simulations where this team finishes in the top 8 of 3rd-place teams"><span style="color:#888">Advance</span><br><span class="${probCls}" style="font-size:1.3rem;font-weight:700">${prob}%</span></div>
+            <div data-floattip="Average rank across all simulations (lower is better)"><span style="color:#888">Expected Rank</span><br><span style="font-size:1.3rem;font-weight:700">${isElim ? "Eliminated" : mc.avg_rank+"/12"}</span></div>
+            <div data-floattip="The middle rank: half the simulations finish above this, half below"><span style="color:#888">Median Rank</span><br><span style="font-size:1.3rem;font-weight:700">${isElim ? "Eliminated" : mc.median_rank+"/12"}</span></div>
+            <div data-floattip="Number of random simulations run"><span style="color:#888">Simulations</span><br><span style="font-size:1.3rem;font-weight:700">${total.toLocaleString()}</span></div>
         </div>
         <div style="color:#888;font-size:0.8rem;margin-bottom:4px">Rank Distribution (green = advances)</div>
         <div class="rank-dist">${bars || '<span style="color:#666">No distribution data</span>'}</div>
@@ -614,14 +623,31 @@ function escapeHtml(s) {
     return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
+// Floating tooltip for elements that use data-floattip (avoids CSS clip issues)
+var _floatTip = document.getElementById("floatTip");
+document.addEventListener("mousemove", function(e) {
+    if (!_floatTip || _floatTip.style.display === "none") return;
+    var tw = _floatTip.offsetWidth, th = _floatTip.offsetHeight;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var x = e.clientX + 12;
+    var y = e.clientY + 12;
+    if (x + tw > vw - 8) x = e.clientX - tw - 12;
+    if (y + th > vh - 8) y = e.clientY - th - 12;
+    _floatTip.style.left = x + "px";
+    _floatTip.style.top  = y + "px";
+});
 document.addEventListener("mouseover", function(e) {
-    var el = e.target.closest("[data-tip]");
-    if (!el) return;
-    el.classList.remove("tip-below","tip-left","tip-right");
-    var r = el.getBoundingClientRect(), vw = window.innerWidth;
-    if (r.top < 40) el.classList.add("tip-below");
-    if (r.left < 120) el.classList.add("tip-left");
-    if (r.right > vw - 120) el.classList.add("tip-right");
+    // data-floattip: JS-positioned floating tooltip, immune to CSS clipping
+    var ft = e.target.closest("[data-floattip]");
+    if (ft) {
+        _floatTip.textContent = ft.dataset.floattip;
+        _floatTip.style.display = "block";
+    }
+
+});
+document.addEventListener("mouseout", function(e) {
+    var ft = e.target.closest("[data-floattip]");
+    if (ft && _floatTip) _floatTip.style.display = "none";
 });
 
 const POLL_LIVE_MS   = 30_000;   // 30s when a match is live
