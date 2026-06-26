@@ -71,6 +71,17 @@ tr.highlighted td:first-child{padding-left:5px}
 .outcome-rank.adv{color:#4ade80}
 .outcome-rank.elim{color:#f87171}
 .outcome-rank.top2{color:#22d3ee}
+.outcome-simbar-row{grid-column:1/-1;display:grid;grid-template-columns:1fr 50px;align-items:center;gap:8px;margin-top:2px;padding-bottom:2px}
+.outcome-simbar-track{position:relative;height:10px;background:#1a1a2e;border-radius:3px;overflow:visible}
+.outcome-simbar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:3px;transition:width .2s}
+.outcome-simbar-fill.high{background:#2f7d4f}
+.outcome-simbar-fill.mid{background:#a87a1f}
+.outcome-simbar-fill.low{background:#8a3636}
+.outcome-simbar-baseline{position:absolute;top:-2px;bottom:-2px;width:0;border-left:1.5px dashed #888;z-index:1}
+.outcome-simbar-pct{font-size:0.78rem;font-weight:600;text-align:right}
+.outcome-simbar-pct.high{color:#4ade80}
+.outcome-simbar-pct.mid{color:#fbbf24}
+.outcome-simbar-pct.low{color:#f87171}
 
 /* ── GD strip (own matches only) ── */
 .gd-strip{margin-top:8px;padding-top:6px;border-top:1px solid #1a1a2a}
@@ -169,6 +180,7 @@ tr.highlighted td:first-child{padding-left:5px}
         <div class="tip-rich-row"><span class="dot" style="background:#f87171"></span><span>Country is playing, or a rival can directly overtake them</span></div>
         <div class="tip-rich-row"><span class="dot" style="background:#fb923c"></span><span>A team could leapfrog them with a win</span></div>
         <div class="tip-rich-row"><span class="dot" style="background:#fbbf24"></span><span>Indirect effect on standings</span></div>
+        "Rank N/12" assumes every other match stays exactly as it is today — accurate for the very next match, less so further out. "sim %" instead reflects thousands of simulated ways the rest of the tournament could go, so it stays meaningful for matches later in the schedule too.
         Click a match header to collapse its outcome table.
     </div>
 </div>
@@ -192,6 +204,7 @@ tr.highlighted td:first-child{padding-left:5px}
 
 <script>
 let currentCountry = "South Korea";
+let currentBaseline = null; // the selected team's unconditional advance % from the latest Monte Carlo run, used as the reference line in match outcome bars
 // track which panels are EXPANDED (default: all collapsed)
 let expandedPanels = new Set();
 
@@ -245,6 +258,7 @@ function togglePanel(id) {
 }
 
 function render(data) {
+    currentBaseline = (data.monte_carlo && typeof data.monte_carlo.prob === "number") ? data.monte_carlo.prob : null;
     renderStatus(data);
     renderStandings(data);
     renderLive(data);
@@ -322,6 +336,43 @@ function outcomeRankHtml(res) {
     return `<span class="outcome-rank ${adv ? 'adv' : 'elim'}">${adv ? '✓' : '✗'} Rank ${rank}/12</span>`;
 }
 
+// The snapshot rank above answers "if every other unplayed match across
+// every group stayed exactly as it is right now, what would this outcome
+// mean" — true for the very next match in the tournament, but increasingly
+// hypothetical for matches further out, since other groups' matches will
+// actually be decided before this one's result matters.
+//
+// The bar below instead answers "across thousands of simulated ways the
+// *rest of the tournament* could realistically go, in what fraction of the
+// ones where this match ended this way did the selected team advance" —
+// it doesn't freeze anything, so it stays meaningful regardless of how far
+// out the match is. The dashed line marks the team's current overall
+// advance odds, so the bar reads as "better/worse than where I am now"
+// rather than a number with no anchor.
+function simBarHtml(res) {
+    if (!res || res.sim_advance_pct == null) return "";
+    const pct = res.sim_advance_pct;
+    const base = currentBaseline;
+    let tier = "mid";
+    if (base != null) {
+        if (pct >= base + 10) tier = "high";
+        else if (pct <= base - 10) tier = "low";
+    } else {
+        tier = pct >= 60 ? "high" : pct <= 25 ? "low" : "mid";
+    }
+    const baselineMarker = base != null
+        ? `<div class="outcome-simbar-baseline" style="left:${Math.min(Math.max(base,0),100)}%" title="Current baseline: ${base}% advance"></div>`
+        : "";
+    return `
+        <div class="outcome-simbar-row" data-tip="Share of simulations where this match went this way, and the team advanced overall (n=${(res.sim_n||0).toLocaleString()})">
+            <div class="outcome-simbar-track">
+                <div class="outcome-simbar-fill ${tier}" style="width:${Math.min(Math.max(pct,0),100)}%"></div>
+                ${baselineMarker}
+            </div>
+            <span class="outcome-simbar-pct ${tier}">${pct}%</span>
+        </div>`;
+}
+
 function renderMatchOutcomePanel(m) {
     const t1 = escapeHtml(m.team1);
     const t2 = escapeHtml(m.team2);
@@ -338,6 +389,7 @@ function renderMatchOutcomePanel(m) {
             <span class="outcome-label">${r.label}</span>
             <span class="outcome-score">${r.score}</span>
             ${outcomeRankHtml(r.res)}
+            ${simBarHtml(r.res)}
         </div>`).join("");
 
     let gdHtml = "";

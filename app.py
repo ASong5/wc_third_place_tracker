@@ -322,7 +322,16 @@ def team_status(team: str, standings: dict) -> dict:
     }
 
 
-def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_ITERATIONS) -> dict:
+def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_ITERATIONS, track_matches: bool = False) -> dict:
+    """Run the Monte Carlo simulation.
+
+    When track_matches=True, also records, for every still-unplayed match,
+    which simulations sampled which outcome (1/X/2) for that match, plus
+    whether the selected... no, ANY team's advancing status held in each
+    of those simulations. This lets conditional advance probabilities
+    ("given this match goes this way, how often does team T advance?") be
+    derived from the *same* simulation run, without resampling anything.
+    """
     remaining_by_group = defaultdict(list)
     for m in matches:
         if m.get("status") != "finished":
@@ -334,8 +343,20 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
     all_rank_dists: dict[str, defaultdict[int, int]] = defaultdict(lambda: defaultdict(int))
     all_found: set[str] = set()
 
+    # match_id -> outcome ("1"/"X"/"2") -> team -> count of sims (in that
+    # outcome bucket) where team finished in an advancing position.
+    match_cond_advances: dict[str, dict[str, defaultdict[str, int]]] = (
+        defaultdict(lambda: {"1": defaultdict(int), "X": defaultdict(int), "2": defaultdict(int)})
+        if track_matches else {}
+    )
+    # match_id -> outcome -> count of sims that sampled that outcome (denominator)
+    match_outcome_totals: dict[str, defaultdict[str, int]] = (
+        defaultdict(lambda: defaultdict(int)) if track_matches else {}
+    )
+
     for _ in range(n):
         all_thirds = []
+        sim_sampled: dict[str, str] = {}
         for gname, table in standings.items():
             if gname in locked:
                 if len(table) >= 3:
@@ -345,6 +366,8 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
             sampled: dict[str, str] = {}
             for m in remaining:
                 sampled[str(m.get("id", ""))] = sample_result(rating(m["team1"]), rating(m["team2"]))
+            if track_matches:
+                sim_sampled.update(sampled)
             cur_tbl = {r["team"]: dict(r) for r in table}
             for m in remaining:
                 r1, r2 = rating(m["team1"]), rating(m["team2"])
@@ -370,9 +393,21 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
                 all_thirds.append(final[2])
 
         all_thirds.sort(key=rank_key)
+        advancing_teams: set[str] = set()
+        for gname, table in standings.items():
+            for idx, row in enumerate(table[:2]):
+                advancing_teams.add(row["team"])
         for i, t in enumerate(all_thirds):
             all_rank_dists[t["team"]][i + 1] += 1
             all_found.add(t["team"])
+            if i + 1 <= ADVANCE_SLOTS:
+                advancing_teams.add(t["team"])
+
+        if track_matches:
+            for mid, res in sim_sampled.items():
+                match_outcome_totals[mid][res] += 1
+                for team in advancing_teams:
+                    match_cond_advances[mid][res][team] += 1
 
     result: dict[str, dict] = {}
     for team in all_found:
@@ -403,6 +438,21 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
                 result[t] = {"prob": 100.0, "avg_rank": 1.0, "median_rank": 1, "rank_dist": {1: n}, "total_sims": n, "note": "Already advancing (top 2 in group)"}
             else:
                 result[t] = {"prob": 0.0, "avg_rank": 12, "median_rank": 12, "rank_dist": {}, "total_sims": n, "note": "Eliminated"}
+
+    if track_matches:
+        cond: dict[str, dict] = {}
+        for mid, outcome_totals in match_outcome_totals.items():
+            cond[mid] = {}
+            for outcome in ("1", "X", "2"):
+                denom = outcome_totals.get(outcome, 0)
+                cond[mid][outcome] = {
+                    "n_sims": denom,
+                    "advance_pct": {
+                        team: round(cnt / denom * 100, 1)
+                        for team, cnt in match_cond_advances[mid][outcome].items()
+                    } if denom else {},
+                }
+        result["_conditional"] = cond
 
     return result
 
@@ -791,7 +841,34 @@ def _gd_sweep(standings: dict, match: dict, country: str, rival_team: str | None
     return [by_margin[m] for m in margins if start <= m <= end]
 
 
-def compute_outcomes_for_match(standings: dict, match: dict, country: str) -> dict:
+def conditional_outcome_probs(mc_conditional: dict, match_id: Any, country: str) -> dict | None:
+    """For a given match and country, return how often `country` advances
+    in each of the simulation buckets where that match went 1/X/2 — i.e.
+    the conditional Monte Carlo probabilities, derived from the cached
+    full-tournament simulation rather than a frozen single-match splice.
+
+    Returns None if this match wasn't part of the tracked simulation
+    (e.g. it's already finished, or matches between cache refreshes).
+    """
+    cond = mc_conditional.get(str(match_id))
+    if not cond:
+        return None
+    out = {}
+    for outcome in ("1", "X", "2"):
+        bucket = cond.get(outcome, {})
+        n_sims = bucket.get("n_sims", 0)
+        # advance_pct only contains entries for teams that advanced in at
+        # least one tracked simulation; absence means 0%, not "no data" —
+        # only an empty/zero n_sims bucket means we truly have nothing.
+        pct = bucket.get("advance_pct", {}).get(country, 0.0 if n_sims else None)
+        out[outcome] = {
+            "advance_pct": pct,
+            "n_sims": n_sims,
+        }
+    return out
+
+
+def compute_outcomes_for_match(standings: dict, match: dict, country: str, mc_conditional: dict | None = None) -> dict:
     group = match.get("group", "")
     involves_country = country in (match["team1"], match["team2"])
     result: dict[str, Any] = {
@@ -807,6 +884,13 @@ def compute_outcomes_for_match(standings: dict, match: dict, country: str) -> di
 
     for out in ["1", "X", "2"]:
         result[out] = compute_outcome(standings, match, country, out)
+
+    if mc_conditional:
+        cond = conditional_outcome_probs(mc_conditional, match["id"], country)
+        if cond:
+            for out in ["1", "X", "2"]:
+                result[out]["sim_advance_pct"] = cond[out]["advance_pct"]
+                result[out]["sim_n"] = cond[out]["n_sims"]
 
     if involves_country:
         is_t1 = match["team1"] == country
@@ -856,7 +940,7 @@ def compute_outcomes_for_match(standings: dict, match: dict, country: str) -> di
     return result
 
 
-def compute_group_outcomes(standings: dict, matches: list[dict], country: str) -> dict:
+def compute_group_outcomes(standings: dict, matches: list[dict], country: str, mc_conditional: dict | None = None) -> dict:
     country_group = None
     for gname, table in standings.items():
         for row in table:
@@ -874,17 +958,17 @@ def compute_group_outcomes(standings: dict, matches: list[dict], country: str) -
     return {
         "country": country,
         "group": country_group,
-        "matches": [compute_outcomes_for_match(standings, m, country) for m in remaining],
+        "matches": [compute_outcomes_for_match(standings, m, country, mc_conditional) for m in remaining],
     }
 
 
-def precompute_key_match_outcomes(standings: dict, matches: list[dict], country: str) -> list[dict]:
+def precompute_key_match_outcomes(standings: dict, matches: list[dict], country: str, mc_conditional: dict | None = None) -> list[dict]:
     """Pre-compute all three outcomes for every upcoming key match."""
     result = []
     for m in matches:
         if m.get("status") == "finished":
             continue
-        outcome_data = compute_outcomes_for_match(standings, m, country)
+        outcome_data = compute_outcomes_for_match(standings, m, country, mc_conditional)
         result.append(outcome_data)
     return result
 
@@ -1046,13 +1130,15 @@ def api_data():
     if h != _MC_CACHE_HASH:
         saved_mode = SIM_MODE
         SIM_MODE = "elo"
-        elo_res = run_monte_carlo(standings, matches)
+        elo_res = run_monte_carlo(standings, matches, track_matches=True)
         SIM_MODE = "equal"
-        equal_res = run_monte_carlo(standings, matches)
+        equal_res = run_monte_carlo(standings, matches, track_matches=True)
         SIM_MODE = saved_mode
         _MC_CACHE = {"elo": elo_res, "equal": equal_res}
         _MC_CACHE_HASH = h
-    mc = _MC_CACHE.get(req_mode, {}).get(country, {"prob": 0, "avg_rank": 12, "median_rank": 12, "rank_dist": {}, "total_sims": MONTE_CARLO_ITERATIONS, "note": "Not in 3rd-place standings"})
+    mc_full = _MC_CACHE.get(req_mode, {})
+    mc = mc_full.get(country, {"prob": 0, "avg_rank": 12, "median_rank": 12, "rank_dist": {}, "total_sims": MONTE_CARLO_ITERATIONS, "note": "Not in 3rd-place standings"})
+    mc_conditional = mc_full.get("_conditional", {})
 
     SIM_MODE = req_mode
     scenarios = compute_scenarios(standings, matches, country)
@@ -1071,8 +1157,8 @@ def api_data():
             remaining_counts[m["team1"]] = remaining_counts.get(m["team1"], 0) + 1
             remaining_counts[m["team2"]] = remaining_counts.get(m["team2"], 0) + 1
 
-    key_outcomes = precompute_key_match_outcomes(standings, key_upcoming, country)
-    live_outcomes = precompute_key_match_outcomes(standings, live_raw, country)
+    key_outcomes = precompute_key_match_outcomes(standings, key_upcoming, country, mc_conditional)
+    live_outcomes = precompute_key_match_outcomes(standings, live_raw, country, mc_conditional)
 
     severity_map = {str(m["id"]): m["severity"] for m in key_upcoming}
     for ko in key_outcomes:
@@ -1174,9 +1260,9 @@ def _warm_mc_cache():
     h = _state_hash(standings)
     saved = SIM_MODE
     SIM_MODE = "elo"
-    elo_res = run_monte_carlo(standings, matches)
+    elo_res = run_monte_carlo(standings, matches, track_matches=True)
     SIM_MODE = "equal"
-    equal_res = run_monte_carlo(standings, matches)
+    equal_res = run_monte_carlo(standings, matches, track_matches=True)
     SIM_MODE = saved
     _MC_CACHE = {"elo": elo_res, "equal": equal_res}
     _MC_CACHE_HASH = h
