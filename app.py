@@ -169,6 +169,8 @@ def fetch_all_data(force: bool = False) -> dict[str, Any]:
         _last_fetch.update(result)
         return result
     except Exception as e:
+        print(f"[fetch_all_data] Failed to fetch/parse API data: {e}")
+        traceback.print_exc()
         return _last_fetch
 
 
@@ -1150,6 +1152,8 @@ def _bg_refresh():
             consecutive_errors = 0
         except Exception:
             consecutive_errors += 1
+            print(f"[bg_refresh] refresh_data() raised an exception (consecutive errors: {consecutive_errors}):")
+            traceback.print_exc()
 
 
 def _warm_mc_cache():
@@ -1171,9 +1175,15 @@ def _warm_mc_cache():
     print(f"  Monte Carlo warmed ({MONTE_CARLO_ITERATIONS:,}×2 modes)")
 
 
-if __name__ == "__main__":
-    print("🌐 Fetching initial data...")
-    refresh_data()
+def _startup():
+    """Run once at import time (works under both gunicorn and __main__)."""
+    global _LATEST_DATA, _ALL_TEAMS
+    print("🌐 Fetching initial World Cup data...")
+    try:
+        refresh_data()
+    except Exception:
+        print("[startup] refresh_data() failed:")
+        traceback.print_exc()
 
     if not _LATEST_DATA.get("standings"):
         cache_path = Path(__file__).with_name("wc_cache.json")
@@ -1183,19 +1193,29 @@ if __name__ == "__main__":
                     cached = json.load(f)
                 _LATEST_DATA = cached
                 _ALL_TEAMS = cached.get("all_teams", [])
-                print("  Loaded cached data (API unreachable)")
+                print("  Loaded cached data (API unreachable at startup)")
             except Exception:
                 pass
 
     if not _LATEST_DATA.get("standings"):
-        print("Warning: No tournament data available. Starting server with empty data.")
-
-    if _LATEST_DATA.get("standings"):
+        print("⚠️  Warning: No tournament data available. Starting with empty data.")
+    else:
         print(f"  {len(_ALL_TEAMS)} teams loaded.")
+
+    t = threading.Thread(target=_bg_refresh, daemon=True)
+    t.start()
+    print("  Background refresh thread started.")
+
+
+_startup()
+
+
+if __name__ == "__main__":
+    # _startup() already ran at import time (initial fetch + background thread).
+    # Just warm the Monte Carlo cache and launch the dev server.
+    if _LATEST_DATA.get("standings"):
         print(f"  Warming Monte Carlo ({MONTE_CARLO_ITERATIONS:,} × 2 modes)...")
         _warm_mc_cache()
 
     print(f"  Starting server at http://localhost:{PORT}")
-    t = threading.Thread(target=_bg_refresh, daemon=True)
-    t.start()
     app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False)
