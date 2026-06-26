@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2026 WC Advancement Tracker</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f0f23;color:#ddd;font-family:system-ui,sans-serif;padding:16px;min-height:100vh}
+.container{max-width:1200px;margin:0 auto}
+h1{font-size:1.3rem;font-weight:700;color:#fff;margin-bottom:4px}
+.sub{color:#888;font-size:0.85rem;margin-bottom:16px}
+select{background:#1e1e3a;color:#fff;border:1px solid #333;padding:8px 12px;border-radius:6px;font-size:0.95rem;cursor:pointer}
+select:focus{outline:2px solid #f0c040}
+
+.status-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:#1a1a3a;border-radius:10px;padding:16px 20px;margin-bottom:16px;border:1px solid #2a2a4a}
+.status-icon{font-size:1.5rem}
+.status-text{font-size:1.1rem;font-weight:600}
+.status-rank{font-size:0.95rem;color:#aaa}
+.status-prob{font-size:0.95rem;margin-left:auto}
+.prob-bar{width:120px;height:8px;background:#2a2a4a;border-radius:4px;overflow:hidden;margin-left:8px}
+.prob-fill{height:100%;border-radius:4px;transition:width .5s}
+.green{color:#4ade80}
+.red{color:#f87171}
+.yellow{color:#fbbf24}
+.orange{color:#fb923c}
+.grey{color:#666}
+
+.grid{display:grid;grid-template-columns:1.5fr 1fr;gap:12px;margin-bottom:12px}
+.grid-full{grid-template-columns:1fr}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+
+.card{background:#1a1a3a;border-radius:10px;padding:16px;border:1px solid #2a2a4a}
+.card-title{font-size:0.85rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#888;margin-bottom:12px}
+
+table{width:100%;border-collapse:collapse;font-size:0.9rem}
+th{text-align:left;padding:6px 8px;color:#666;font-weight:500;border-bottom:1px solid #2a2a4a;font-size:0.8rem;text-transform:uppercase}
+td{padding:6px 8px;border-bottom:1px solid #1a1a2a}
+tr:hover{background:#22224a;cursor:pointer}
+tr.highlighted{background:#2a2a4a;border-left:3px solid #f0c040}
+tr.highlighted td:first-child{padding-left:5px}
+.rank-num{color:#666;text-align:center;width:28px}
+.team-name{font-weight:500}
+.pts{text-align:center;font-weight:600}
+.gd{text-align:center;color:#888}
+
+/* ── Match card ── */
+.match-card{border-bottom:1px solid #1a1a2a}
+.match-card:last-child{border-bottom:none}
+.match-header{display:flex;align-items:center;gap:6px;padding:8px 4px;cursor:pointer;user-select:none}
+.match-header:hover{background:#22224a}
+.match-teams{font-weight:500;font-size:0.95rem;flex:1}
+.match-score{display:inline-block;background:#2a2a4a;padding:2px 10px;border-radius:4px;font-weight:700;font-size:1rem;margin:0 6px;min-width:40px;text-align:center}
+.match-minute{color:#f87171;font-size:0.8rem}
+.match-group{color:#666;font-size:0.75rem}
+.badge{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.badge-red{background:#f87171}
+.badge-orange{background:#fb923c}
+.badge-yellow{background:#fbbf24}
+.badge-grey{background:#666}
+.collapse-toggle{color:#555;font-size:0.75rem;flex-shrink:0;padding:0 4px;line-height:1}
+
+/* ── Outcome table (always visible by default, collapsible) ── */
+.outcome-panel{padding:0 4px 10px 18px;overflow:hidden}
+.outcome-panel.collapsed{display:none}
+.outcome-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid #12122a;font-size:0.85rem}
+.outcome-row:last-child{border-bottom:none}
+.outcome-label{color:#aaa}
+.outcome-score{color:#666;font-size:0.75rem;min-width:36px;text-align:right}
+.outcome-rank{font-weight:600;min-width:64px;text-align:right}
+.outcome-rank.adv{color:#4ade80}
+.outcome-rank.elim{color:#f87171}
+.outcome-rank.top2{color:#22d3ee}
+
+/* ── GD strip (own matches only) ── */
+.gd-strip{margin-top:8px;padding-top:6px;border-top:1px solid #1a1a2a}
+.gd-strip-label{font-size:0.7rem;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}
+.gd-cells{display:flex;gap:3px;flex-wrap:wrap}
+.gd-cell{padding:2px 6px;border-radius:3px;font-size:0.72rem;white-space:nowrap;font-weight:500}
+.gd-cell.adv{background:#0a2e1a;color:#4ade80}
+.gd-cell.warn{background:#2e2a0a;color:#fbbf24}
+.gd-cell.elim{background:#2e0a0a;color:#f87171}
+
+.tag{display:inline-block;padding:0 6px;border-radius:3px;font-size:0.7rem;font-weight:600}
+.tag-green{background:#1a3a1a;color:#4ade80}
+.tag-red{background:#3a1a1a;color:#f87171}
+
+.scenario-item{margin-bottom:16px}
+.scenario-item:last-child{margin-bottom:0}
+.scenario-label{font-size:0.8rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.scenario-rank{font-size:1.2rem;font-weight:700}
+.scenario-detail{font-size:0.85rem;color:#888}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+.simulate-btn{background:#2a2a4a;color:#f0c040;border:1px solid #f0c040;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:0.9rem;font-weight:600;margin-top:8px}
+.simulate-btn:hover{background:#3a3a5a}
+.simulate-btn:disabled{opacity:.4;cursor:wait}
+.loading-text{color:#888;font-size:0.85rem;padding:16px 0;text-align:center}
+.loading-text::before{content:"";display:inline-block;width:14px;height:14px;border:2px solid #444;border-top-color:#f0c040;border-radius:50%;animation:spin .8s linear infinite;margin-right:8px;vertical-align:middle}
+.projected-table{font-size:0.85rem;margin-top:8px;width:100%}
+.projected-table th{color:#888;font-size:0.7rem;padding:3px 6px}
+.projected-table td{padding:3px 6px}
+.projected-table tr.selection td{color:#f0c040;font-weight:700}
+
+[data-tip]{position:relative;cursor:help}
+[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#111;color:#ddd;padding:6px 10px;border-radius:5px;font-size:0.75rem;z-index:100;border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,.5);pointer-events:none;font-weight:400;min-width:180px;max-width:min(90vw,400px);white-space:normal;text-align:left}
+[data-tip]:hover::before{content:"";position:absolute;bottom:calc(100% - 2px);left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#333;z-index:100;pointer-events:none}
+[data-tip].tip-below:hover::after{bottom:auto;top:calc(100% + 6px)}
+[data-tip].tip-below:hover::before{bottom:auto;top:calc(100% - 2px);border-top-color:transparent;border-bottom-color:#333}
+[data-tip].tip-left:hover::after{left:8px;transform:none}
+[data-tip].tip-left:hover::before{left:20px;transform:none}
+[data-tip].tip-right:hover::after{left:auto;right:8px;transform:none}
+[data-tip].tip-right:hover::before{left:auto;right:20px;transform:none}
+
+/* Rich tooltip: real HTML content (line breaks, colored dots) instead of the attr()-only [data-tip] mechanism */
+.tip-rich{position:relative;cursor:help}
+.tip-rich .tip-rich-content{display:none;position:absolute;bottom:calc(100% + 6px);left:0;background:#111;color:#ddd;padding:8px 10px;border-radius:5px;font-size:0.75rem;z-index:100;border:1px solid #333;box-shadow:0 4px 12px rgba(0,0,0,.5);font-weight:400;min-width:220px;max-width:min(90vw,360px);white-space:normal;text-align:left;line-height:1.5}
+.tip-rich:hover .tip-rich-content{display:block}
+.tip-rich-content{text-transform:none;letter-spacing:normal;font-weight:400}
+.tip-rich-row{display:flex;align-items:flex-start;gap:6px;margin:2px 0}
+.tip-rich-row .dot{flex-shrink:0;width:8px;height:8px;border-radius:50%;margin-top:3px}
+
+.rank-dist{display:flex;gap:2px;align-items:flex-end;height:60px;margin-top:8px}
+.rank-bar{flex:1;background:#2a2a4a;border-radius:3px 3px 0 0;position:relative;min-width:20px;transition:height .3s}
+.rank-bar .label{position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);font-size:0.7rem;color:#666}
+.rank-bar .pct{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:0.7rem;color:#aaa}
+.rank-bar.fill{background:linear-gradient(to top,#4ade80,#22d3ee)}
+.error{color:#f87171;padding:20px;text-align:center}
+</style>
+</head>
+<body>
+<div class="container">
+<header style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+<div>
+<h1>🏆 2026 World Cup — 3rd Place Advancement Tracker</h1>
+<p class="sub">Which 3rd-placed team advances to the knockout stage?</p>
+</div>
+<div style="display:flex;gap:12px;align-items:center">
+<div style="display:flex;gap:8px;background:#1a1a3a;padding:4px 10px;border-radius:6px;border:1px solid #2a2a4a">
+<span data-tip="How strongly teams are weighted when simulating match outcomes" style="color:#888;font-size:0.8rem">Mode:</span>
+<label data-tip="Stronger teams (more points in tournament) are more likely to win remaining matches" style="cursor:pointer;font-size:0.85rem"><input type="radio" name="simMode" value="elo" onchange="setMode('elo')"> Elo</label>
+<label data-tip="Every match outcome (home win / draw / away win) is equally likely regardless of team strength" style="cursor:pointer;font-size:0.85rem"><input type="radio" name="simMode" value="equal" checked onchange="setMode('equal')"> Equal</label>
+</div>
+<select id="countrySelect" onchange="selectCountry(this.value)"></select>
+</div>
+</header>
+
+<div id="statusBar" class="status-bar"><span class="loading-text">Connecting...</span></div>
+
+<div class="grid">
+<div class="card">
+<div class="card-title" data-tip="All 12 third-placed teams, sorted by Pts → GD → GF. Top 8 advance to the knockout stage. Click any team to track it.">3rd-Place Standings</div>
+<table id="standingsTable">
+<thead><tr><th>#</th><th>Team</th><th>Pts</th><th>GD</th><th>GF</th><th>Group</th><th data-tip="Group matches still to play for this team" style="color:#888;font-size:0.7rem;cursor:help">Left</th></tr></thead>
+<tbody id="standingsBody"><tr><td colspan="7"><div class="loading-text">Loading standings...</div></td></tr></tbody>
+</table>
+</div>
+<div class="card">
+<div class="card-title" id="liveTitle">🔴 Live Matches</div>
+<div id="liveMatches"><div style="color:#666;font-size:0.9rem">No live matches</div></div>
+</div>
+</div>
+
+<div class="grid">
+<div class="card">
+<div class="card-title tip-rich">⏳ Key Upcoming Matches
+    <div class="tip-rich-content">
+        Upcoming matches ranked by impact on the selected country.
+        <div class="tip-rich-row"><span class="dot" style="background:#f87171"></span><span>Country is playing, or a rival can directly overtake them</span></div>
+        <div class="tip-rich-row"><span class="dot" style="background:#fb923c"></span><span>A team could leapfrog them with a win</span></div>
+        <div class="tip-rich-row"><span class="dot" style="background:#fbbf24"></span><span>Indirect effect on standings</span></div>
+        Click a match header to collapse its outcome table.
+    </div>
+</div>
+<div id="keyMatches"><div class="loading-text">Loading matches...</div></div>
+</div>
+<div class="card" style="align-self:start">
+<div class="card-title" data-tip="Best, most likely, and worst possible rank for the selected team if remaining match results swing favorably or unfavorably.">📈 Scenarios</div>
+<div id="scenarios"><div class="loading-text">Loading scenarios...</div></div>
+</div>
+</div>
+
+<div class="grid grid-full">
+<div class="card">
+<div class="card-title" data-tip="Monte Carlo simulation: thousands of random simulations of all remaining group matches, showing how often each rank is achieved.">📊 Advance Probability</div>
+<div id="monteCarlo"><div class="loading-text">Computing probabilities...</div></div>
+<button class="simulate-btn" id="simulateBtn" onclick="runSimulate()" data-tip="Runs one random simulation of every remaining group match and shows the resulting 3rd-place table.">🎲 Simulate All Remaining Matches</button>
+<div id="simulateResult"></div>
+</div>
+</div>
+</div>
+
+<script>
+let currentCountry = "South Korea";
+// track which panels are EXPANDED (default: all collapsed)
+let expandedPanels = new Set();
+
+function selectCountry(name) {
+    currentCountry = name;
+    expandedPanels.clear();
+    document.getElementById("countrySelect").value = name;
+    fetchData();
+}
+
+function setMode(mode) {
+    fetchData();
+}
+
+function currentMode() {
+    const el = document.querySelector('input[name="simMode"]:checked');
+    return el ? el.value : "equal";
+}
+
+async function fetchData() {
+    try {
+        const r = await fetch(`/api/data?country=${encodeURIComponent(currentCountry)}&mode=${currentMode()}`);
+        const data = await r.json();
+        render(data);
+    } catch(e) {
+        document.getElementById("standingsBody").innerHTML = '<tr><td colspan="7" class="error">Failed to load data</td></tr>';
+        document.getElementById("statusBar").innerHTML = '<span style="color:#f87171">❌ Connection error</span>';
+    }
+}
+
+async function fetchTeams() {
+    try {
+        const r = await fetch("/api/teams");
+        const data = await r.json();
+        const sel = document.getElementById("countrySelect");
+        sel.innerHTML = data.teams.map(t => `<option value="${t}"${t === currentCountry ? " selected" : ""}>${t}</option>`).join("");
+    } catch(e) {}
+}
+
+function togglePanel(id) {
+    if (expandedPanels.has(id)) {
+        expandedPanels.delete(id);
+    } else {
+        expandedPanels.add(id);
+    }
+    const panel = document.getElementById(`outcome-panel-${id}`);
+    const toggle = document.getElementById(`toggle-${id}`);
+    const isExpanded = expandedPanels.has(id);
+    if (panel) panel.classList.toggle("collapsed", !isExpanded);
+    if (toggle) toggle.textContent = isExpanded ? "▼" : "▶";
+}
+
+function render(data) {
+    renderStatus(data);
+    renderStandings(data);
+    renderLive(data);
+    renderKey(data);
+    renderScenarios(data);
+    renderMonteCarlo(data);
+}
+
+function renderStatus(data) {
+    const s = data.country_status;
+    const bar = document.getElementById("statusBar");
+    if (!s || !s.found) {
+        bar.innerHTML = `<span>❓ ${escapeHtml(currentCountry)} — Not found in tournament</span>`;
+        return;
+    }
+    const d = s.data;
+    const icon = {"advancing":"✅","bubble":"⚠️","eliminated":"❌","unknown":"❓"};
+    const cls = {"advancing":"green","bubble":"yellow","eliminated":"red","unknown":"grey"};
+    const rankStr = s.third_place_rank != null ? `3rd Place Rank: ${s.third_place_rank}/12` : s.position != null ? `Group Position: ${s.position}/4` : "";
+    const mc = data.monte_carlo || {};
+    const prob = mc.prob || 0;
+    bar.innerHTML = `
+        <span class="status-icon">${icon[s.status] || "❓"}</span>
+        <div>
+            <div class="status-text ${cls[s.status]}">${escapeHtml(currentCountry)}</div>
+            <div class="status-rank">${s.group} · ${rankStr}${d ? ` · ${d.pts}pts  GD ${d.gd >= 0 ? "+" : ""}${d.gd}  GF ${d.gf}` : ""}</div>
+        </div>
+        <div class="status-prob" data-tip="How often this team finishes in the top 8 of 3rd-place teams across ${mc.total_sims || 50000} simulations">
+            <span class="${prob > 50 ? 'green' : prob > 20 ? 'yellow' : 'red'}" style="font-weight:600">${prob}%</span>
+            <span style="color:#888"> advance</span>
+            <div class="prob-bar"><div class="prob-fill" style="width:${Math.min(prob,100)}%;background:${prob > 50 ? '#4ade80' : prob > 20 ? '#fbbf24' : '#f87171'}"></div></div>
+        </div>`;
+}
+
+function renderStandings(data) {
+    const tbody = document.getElementById("standingsBody");
+    const rcounts = data.remaining_counts || {};
+    if (!data.standings || !data.standings.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="color:#666;text-align:center;padding:16px">No data yet</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.standings.map((t, i) => {
+        const r = i + 1;
+        const isTarget = t.team === currentCountry;
+        const inAdvance = r <= 8;
+        const remaining = rcounts[t.team] || 0;
+        return `<tr class="${isTarget ? 'highlighted' : ''}" onclick="selectCountry('${escapeHtml(t.team).replace(/'/g,"\\'")}')">
+            <td class="rank-num">${isTarget ? '→'+r : r}</td>
+            <td class="team-name" style="${isTarget ? 'color:#f0c040;font-weight:700' : ''}">${escapeHtml(t.team)}</td>
+            <td class="pts ${inAdvance ? 'green' : ''}">${t.pts}</td>
+            <td class="gd">${t.gd >= 0 ? "+" : ""}${t.gd}</td>
+            <td class="gd">${t.gf}</td>
+            <td style="color:#666;font-size:0.8rem">${t.group}</td>
+            <td style="color:#888;font-size:0.75rem;text-align:center">${remaining > 0 ? remaining : '—'}</td>
+        </tr>`;
+    }).join("");
+}
+
+function renderLive(data) {
+    const live = data.live_matches || [];
+    document.getElementById("liveTitle").textContent = live.length
+        ? `🔴 Live Matches (${live.length})`
+        : "🔴 Live Matches";
+    renderMatchList(live, "liveMatches", "No live matches", true);
+}
+
+function outcomeRankHtml(res) {
+    if (!res) return '<span class="outcome-rank" style="color:#555">—</span>';
+    if (res.country_position !== null && res.country_position <= 2) {
+        return `<span class="outcome-rank top2">Advances (${res.country_position}st/2nd)</span>`;
+    }
+    const rank = res.third_place_rank;
+    const adv = res.advancing;
+    if (rank == null) return `<span class="outcome-rank elim">Eliminated</span>`;
+    return `<span class="outcome-rank ${adv ? 'adv' : 'elim'}">${adv ? '✓' : '✗'} Rank ${rank}/12</span>`;
+}
+
+function renderMatchOutcomePanel(m) {
+    const t1 = escapeHtml(m.team1);
+    const t2 = escapeHtml(m.team2);
+    const s1 = m["1"], sX = m["X"], s2 = m["2"];
+
+    const rows = [
+        { label: `${t1} win`, score: s1 ? `${s1.score[0]}–${s1.score[1]}` : "", res: s1 },
+        { label: "Draw",      score: sX ? `${sX.score[0]}–${sX.score[1]}` : "", res: sX },
+        { label: `${t2} win`, score: s2 ? `${s2.score[0]}–${s2.score[1]}` : "", res: s2 },
+    ];
+
+    const rowsHtml = rows.map(r => `
+        <div class="outcome-row">
+            <span class="outcome-label">${r.label}</span>
+            <span class="outcome-score">${r.score}</span>
+            ${outcomeRankHtml(r.res)}
+        </div>`).join("");
+
+    let gdHtml = "";
+    if (m.gd && m.gd.length) {
+        const perspective = m.gd_perspective;
+
+        // Label explains whose result the margins describe
+        const stripLabel = perspective === "country"
+            ? `${escapeHtml(currentCountry)} margin (+ = we win)`
+            : `${t1} margin (+ = ${t1} win)`;
+
+        const cells = m.gd.map(cell => {
+            const sign = cell.margin > 0 ? "+" : "";
+            const label = cell.margin === 0 ? "D" : `${sign}${cell.margin}`;
+            const rankStr = cell.rank != null ? ` R${cell.rank}` : "";
+            // Color by how close the rank sits to the cutoff (8th), not just
+            // the flat adv boolean — otherwise a strip where adv never flips
+            // (e.g. rank moves 4 -> 7, still advancing the whole time) would
+            // render as solid green with no visible signal.
+            let tier;
+            if (cell.rank == null) {
+                tier = "elim";
+            } else if (!cell.adv) {
+                tier = "elim";
+            } else if (cell.rank >= 7) {
+                tier = "warn"; // advancing, but within 1-2 spots of the cutoff
+            } else {
+                tier = "adv";
+            }
+            return `<span class="gd-cell ${tier}" title="${cell.score[0]}–${cell.score[1]}">${label}${rankStr}</span>`;
+        }).join("");
+
+        gdHtml = `<div class="gd-strip">
+            <div class="gd-strip-label">${stripLabel}</div>
+            <div class="gd-cells">${cells}</div>
+        </div>`;
+    }
+
+    return `<div>${rowsHtml}${gdHtml}</div>`;
+}
+
+function renderKey(data) {
+    renderMatchList(data.key_matches || [], "keyMatches", "No upcoming group matches", false);
+}
+
+// Shared renderer for both Key Upcoming Matches and Live Matches — same
+// severity badge, same clickable header, same outcome panel (3 outcomes +
+// GD strip). The only difference is which list/element it's rendering into
+// and whether to show the live score + minute in the header.
+function renderMatchList(matches, elId, emptyMsg, isLiveList) {
+    const el = document.getElementById(elId);
+    const keys = (matches || []).slice().sort((a, b) => {
+        const order = {red:0, orange:1, yellow:2, grey:3};
+        return (order[a.severity]??3) - (order[b.severity]??3);
+    }).slice(0, 15);
+    if (!keys.length) {
+        el.innerHTML = `<div style="color:#666;font-size:0.9rem">${emptyMsg}</div>`;
+        return;
+    }
+    const badgeCls = {red:"badge-red", orange:"badge-orange", yellow:"badge-yellow", grey:"badge-grey"};
+    el.innerHTML = keys.map(m => {
+        const id = m.id;
+        const isExpanded = expandedPanels.has(id);
+        const dateStr = m.date ? `<span style="color:#666;font-size:0.75rem">${m.date.slice(0,5)}</span> ` : "";
+        const liveScore = isLiveList && m.score
+            ? ` <span class="match-score">${m.score[0]}-${m.score[1]}</span>`
+            : "";
+        const minute = isLiveList && m.live_minute != null
+            ? ` <span class="match-minute">${m.live_minute}'</span>`
+            : "";
+        return `<div class="match-card">
+            <div class="match-header" onclick="togglePanel('${id}')">
+                <span class="badge ${isLiveList ? 'badge-red' : (badgeCls[m.severity] || 'badge-grey')}"></span>
+                <div class="match-teams" style="flex:1">
+                    ${dateStr}<span class="match-group">${escapeHtml(m.group)}</span>
+                    <div>${escapeHtml(m.team1)}${liveScore} vs ${escapeHtml(m.team2)}${minute}</div>
+                </div>
+                <span class="collapse-toggle" id="toggle-${id}">${isExpanded ? '▼' : '▶'}</span>
+            </div>
+            <div class="outcome-panel${isExpanded ? '' : ' collapsed'}" id="outcome-panel-${id}">
+                ${renderMatchOutcomePanel(m)}
+            </div>
+        </div>`;
+    }).join("");
+}
+
+function renderScenarios(data) {
+    const el = document.getElementById("scenarios");
+    const s = data.scenarios || {};
+    if (!s.best) {
+        el.innerHTML = '<div style="color:#666">No scenario data</div>';
+        return;
+    }
+    const fmt = (sc, label, icon, cls) => {
+        let rankHtml, advHtml;
+        if (sc.status === "top2") {
+            rankHtml = `<div class="scenario-rank green">Advances from top ${sc.position}</div>`;
+            advHtml = `<div class="scenario-detail">✅ Advances</div>`;
+        } else if (sc.status === "third") {
+            rankHtml = `<div class="scenario-rank ${cls}">Rank ${sc.rank}/12</div>`;
+            advHtml = `<div class="scenario-detail">${sc.adv ? "✅ Advances" : "❌ Eliminated"}</div>`;
+        } else {
+            rankHtml = `<div class="scenario-rank">Not in contention</div>`;
+            advHtml = `<div class="scenario-detail">❌ Eliminated</div>`;
+        }
+        return `<div class="scenario-item">
+            <div class="scenario-label" style="color:${cls === 'green' ? '#4ade80' : cls === 'red' ? '#f87171' : '#fbbf24'}">${icon} ${label}</div>
+            ${rankHtml}${advHtml}
+        </div>`;
+    };
+    el.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div data-tip="Best possible rank if every result goes in this team's favor" style="flex:1;min-width:120px">${fmt(s.best,"Best Case","🌟","green")}</div>
+        <div data-tip="Most probable outcome based on each match's most likely result" style="flex:1;min-width:120px">${fmt(s.likely,"Most Likely","📊","yellow")}</div>
+        <div data-tip="Worst possible rank if every result goes against this team" style="flex:1;min-width:120px">${fmt(s.worst,"Worst Case","💀","red")}</div>
+    </div>`;
+}
+
+function renderMonteCarlo(data) {
+    const el = document.getElementById("monteCarlo");
+    const mc = data.monte_carlo || {};
+    if (!mc.total_sims) {
+        el.innerHTML = '<div style="color:#666">Simulating...</div>';
+        return;
+    }
+    const dist = mc.rank_dist || {};
+    const maxCount = Math.max(...Object.values(dist), 1);
+    const total = mc.total_sims;
+    const bars = Object.entries(dist).map(([rank, count]) => {
+        const pct = (count / total * 100).toFixed(1);
+        const h = Math.max(2, (count / maxCount * 50));
+        const inAdv = parseInt(rank) <= 8;
+        return `<div class="rank-bar ${inAdv ? 'fill' : ''}" style="height:${h}px">
+            <span class="pct">${pct}%</span>
+            <span class="label">${rank}</span>
+        </div>`;
+    }).join("");
+    const prob = mc.prob || 0;
+    const probCls = prob > 50 ? "green" : prob > 20 ? "yellow" : "red";
+    const isElim = prob === 0 || (mc.note && (mc.note.includes("Eliminated") || mc.note.includes("Not in 3rd")));
+    el.innerHTML = `
+        <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+            <div data-tip="Percentage of simulations where this team finishes in the top 8 of 3rd-place teams"><span style="color:#888">Advance</span><br><span class="${probCls}" style="font-size:1.3rem;font-weight:700">${prob}%</span></div>
+            <div data-tip="Average rank across all simulations (lower is better)"><span style="color:#888">Expected Rank</span><br><span style="font-size:1.3rem;font-weight:700">${isElim ? "Eliminated" : mc.avg_rank+"/12"}</span></div>
+            <div data-tip="The middle rank: half the simulations finish above this, half below"><span style="color:#888">Median Rank</span><br><span style="font-size:1.3rem;font-weight:700">${isElim ? "Eliminated" : mc.median_rank+"/12"}</span></div>
+            <div data-tip="Number of random simulations run"><span style="color:#888">Simulations</span><br><span style="font-size:1.3rem;font-weight:700">${total.toLocaleString()}</span></div>
+        </div>
+        <div style="color:#888;font-size:0.8rem;margin-bottom:4px">Rank Distribution (green = advances)</div>
+        <div class="rank-dist">${bars || '<span style="color:#666">No distribution data</span>'}</div>
+        <div style="display:flex;justify-content:space-between;color:#666;font-size:0.7rem;margin-top:20px">
+            <span>1 (best)</span><span>Cutoff: 8th</span><span>12 (worst)</span>
+        </div>`;
+}
+
+async function runSimulate() {
+    const btn = document.getElementById("simulateBtn");
+    const resultEl = document.getElementById("simulateResult");
+
+    // Remember whether the Match Results panel was expanded before this
+    // render replaces resultEl's innerHTML (which would otherwise reset it).
+    const existingDetails = resultEl.querySelector("details");
+    const wasOpen = existingDetails ? existingDetails.open : false;
+
+    btn.disabled = true;
+    btn.textContent = "Simulating...";
+    try {
+        const r = await fetch(`/api/simulate?country=${encodeURIComponent(currentCountry)}`);
+        const data = await r.json();
+        if (!data.standings || !data.standings.length) {
+            resultEl.innerHTML = '<div style="color:#666;margin-top:8px">No data to simulate</div>';
+            return;
+        }
+        const countryRank = data.country_rank || "?";
+        const advText = data.is_advancing
+            ? '<span class="tag tag-green">✅ Advances</span>'
+            : '<span class="tag tag-red">❌ Eliminated</span>';
+        const rows = data.standings.map((t, i) => {
+            const rank = i + 1;
+            const isCountry = t.team === currentCountry;
+            const inAdv = rank <= 8;
+            return `<tr class="${isCountry ? 'selection' : ''}">
+                <td style="color:#666;width:24px">${rank}</td>
+                <td>${escapeHtml(t.team)}</td>
+                <td style="text-align:center;font-weight:600;color:${inAdv ? '#4ade80' : '#888'}">${t.pts}</td>
+                <td style="text-align:center;color:#888">${t.gd >= 0 ? '+' : ''}${t.gd}</td>
+                <td style="color:#888;font-size:0.75rem">${t.group}</td>
+            </tr>`;
+        }).join("");
+        const matches = data.match_results || [];
+        const matchHtml = matches.map(m => {
+            const scoreStr = `${m.score[0]}-${m.score[1]}`;
+            const isLive = m.status === "live";
+            const badge = isLive ? '<span class="badge badge-red"></span>' : '';
+            const minute = isLive && m.live_minute != null ? ` <span style="color:#f87171;font-size:0.75rem">${m.live_minute}'</span>` : '';
+            return `<div style="padding:2px 0;font-size:0.85rem">${badge}<span style="color:#888;font-size:0.75rem">${m.group}</span>
+                <span>${escapeHtml(m.team1)}</span> <strong style="padding:0 4px">${scoreStr}</strong> <span>${escapeHtml(m.team2)}</span>${minute}</div>`;
+        }).join("");
+        resultEl.innerHTML = `<div style="margin-top:12px;padding:8px;background:#1a1a2e;border-radius:6px;border:1px solid #2a2a4a">
+            <div style="margin-bottom:8px;font-size:0.85rem">
+                <span style="color:#888">Projected:</span> <strong>${escapeHtml(currentCountry)}</strong> → Rank <strong>${countryRank}/12</strong> ${advText}
+            </div>
+            ${matches.length ? `<details style="margin-top:8px"${wasOpen ? ' open' : ''}><summary style="color:#888;font-size:0.8rem;cursor:pointer">Match Results (${matches.length})</summary><div style="margin-top:4px">${matchHtml}</div></details>` : ''}
+            <table class="projected-table" style="margin-top:8px">
+                <thead><tr><th>#</th><th>Team</th><th>Pts</th><th>GD</th><th>Group</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <div style="color:#555;font-size:0.7rem;margin-top:4px">One random simulation of all remaining matches</div>
+        </div>`;
+    } catch(e) {
+        resultEl.innerHTML = '<div style="color:#f87171;margin-top:8px">Error running simulation</div>';
+    }
+    btn.disabled = false;
+    btn.textContent = "🎲 Simulate All Remaining Matches";
+}
+
+function escapeHtml(s) {
+    if (!s) return "";
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+document.addEventListener("mouseover", function(e) {
+    var el = e.target.closest("[data-tip]");
+    if (!el) return;
+    el.classList.remove("tip-below","tip-left","tip-right");
+    var r = el.getBoundingClientRect(), vw = window.innerWidth;
+    if (r.top < 40) el.classList.add("tip-below");
+    if (r.left < 120) el.classList.add("tip-left");
+    if (r.right > vw - 120) el.classList.add("tip-right");
+});
+
+fetchTeams();
+fetchData();
+setInterval(fetchData, 30000);
+</script>
+</body>
+</html>
