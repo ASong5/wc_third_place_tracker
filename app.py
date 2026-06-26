@@ -267,7 +267,50 @@ def apply_match_outcome(table: list[dict], match: dict, outcome: str, score1: in
 
 
 def find_remaining(group: str, matches: list[dict]) -> list[dict]:
-    return [m for m in matches if m.get("group") == group and m.get("status") != "finished"]
+    """Return matches that are truly upcoming (not finished, not currently live)."""
+    return [m for m in matches if m.get("group") == group and m.get("status") == "upcoming"]
+
+
+def find_live(group: str, matches: list[dict]) -> list[dict]:
+    """Return matches that are currently in progress."""
+    return [m for m in matches if m.get("group") == group and m.get("status") == "live"]
+
+
+def _apply_live_score(table: dict, match: dict) -> None:
+    """Apply a live match's current score to a mutable standings dict in-place.
+
+    The API standings snapshot may already include partial live-match stats,
+    but we can't rely on that — so we apply the live score unconditionally
+    only when the team has not yet been credited with the extra played game.
+    We detect this by checking if the team's `p` (played) count in the
+    snapshot already reflects this match (i.e. it's already been counted),
+    which would mean the API live-updated the standings mid-game. If the
+    played count hasn't moved yet, we add the goals and result ourselves.
+
+    In practice, most tournament APIs update standings only on match finish,
+    so we almost always need to apply the live score here.
+    """
+    t1, t2 = match["team1"], match["team2"]
+    s1, s2 = match["score"][0], match["score"][1]
+
+    outcome = "1" if s1 > s2 else ("2" if s2 > s1 else "X")
+
+    for name, gf, ga in [(t1, s1, s2), (t2, s2, s1)]:
+        if name not in table:
+            continue
+        row = table[name]
+        row["p"] += 1
+        row["gf"] += gf
+        row["ga"] += ga
+        row["gd"] = row["gf"] - row["ga"]
+        if outcome == "1" and name == t1:
+            row["w"] += 1; row["pts"] += 3
+        elif outcome == "2" and name == t2:
+            row["w"] += 1; row["pts"] += 3
+        elif outcome == "X":
+            row["d"] += 1; row["pts"] += 1
+        else:
+            row["l"] += 1
 
 
 # ─── ANALYSIS ───────────────────────────────────────────────────────────────
@@ -332,11 +375,15 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
     ("given this match goes this way, how often does team T advance?") be
     derived from the *same* simulation run, without resampling anything.
     """
-    remaining_by_group = defaultdict(list)
+    remaining_by_group: defaultdict[str, list] = defaultdict(list)
+    live_by_group: defaultdict[str, list] = defaultdict(list)
     for m in matches:
-        if m.get("status") != "finished":
-            g = m.get("group", "")
+        g = m.get("group", "")
+        if m.get("status") == "live":
+            live_by_group[g].append(m)
+        elif m.get("status") == "upcoming":
             remaining_by_group[g].append(m)
+        # "finished" matches are already baked into standings — skip them.
 
     locked = {g for g, tbl in standings.items() if all(r["p"] >= 3 for r in tbl)}
 
@@ -363,12 +410,16 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
                     all_thirds.append(table[2])
                 continue
             remaining = remaining_by_group.get(gname, [])
+            live = live_by_group.get(gname, [])
             sampled: dict[str, str] = {}
             for m in remaining:
                 sampled[str(m.get("id", ""))] = sample_result(rating(m["team1"]), rating(m["team2"]))
             if track_matches:
                 sim_sampled.update(sampled)
             cur_tbl = {r["team"]: dict(r) for r in table}
+            # Lock in current live scores — treat them as already decided.
+            for m in live:
+                _apply_live_score(cur_tbl, m)
             for m in remaining:
                 r1, r2 = rating(m["team1"]), rating(m["team2"])
                 g1, g2 = typical_score(sampled.get(str(m["id"]), "X"), r1, r2)
@@ -457,12 +508,28 @@ def run_monte_carlo(standings: dict, matches: list[dict], n: int = MONTE_CARLO_I
     return result
 
 
-def compute_scenarios(standings: dict, matches: list[dict], country: str = "South Korea") -> dict:
+def compute_scenarios(standings: dict, matches: list[dict], country: str = "South Korea", mc_country_data: dict | None = None) -> dict:
+    # Apply live scores into a standings snapshot so scenario helpers see the
+    # correct current state rather than the pre-match snapshot.
+    live_standings: dict[str, list[dict]] = {}
+    for gname, table in standings.items():
+        live_matches_in_group = [m for m in matches if m.get("group") == gname and m.get("status") == "live"]
+        if live_matches_in_group:
+            tbl_copy = {r["team"]: dict(r) for r in table}
+            for m in live_matches_in_group:
+                _apply_live_score(tbl_copy, m)
+            live_standings[gname] = sorted(tbl_copy.values(), key=rank_key)
+        else:
+            live_standings[gname] = table
+    standings = live_standings  # shadow: all downstream helpers use this
+
     remaining_by_group = defaultdict(list)
     for m in matches:
-        if m.get("status") != "finished":
+        if m.get("status") == "upcoming":
             g = m.get("group", "")
             remaining_by_group[g].append(m)
+        # live matches are now baked into `standings` above; finished matches
+        # are already reflected in the original standings — skip both.
 
     locked = {g for g, tbl in standings.items() if all(r["p"] >= 3 for r in tbl)}
 
@@ -603,12 +670,40 @@ def compute_scenarios(standings: dict, matches: list[dict], country: str = "Sout
 
     b, bpos = build("best")
     w, wpos = build("worst")
-    l, lpos = build("likely")
-    br, wr, lr = country_rank(b), country_rank(w), country_rank(l)
+    br, wr = country_rank(b), country_rank(w)
+
+    if mc_country_data and mc_country_data.get("rank_dist"):
+        # "Likely" now reflects the Monte Carlo's median rank across thousands
+        # of randomized simulations, instead of one arbitrary deterministic
+        # path (every remaining match decided by its single favorite). The
+        # old approach could disagree with — and even move opposite to — the
+        # Monte Carlo's overall advance probability, since a single most-
+        # likely-per-match path and a probability-weighted average over many
+        # simulated paths aren't the same statistic and aren't guaranteed to
+        # move the same direction when the model (Elo vs equal) changes.
+        likely_data = {
+            "rank": mc_country_data.get("median_rank"),
+            "adv": mc_country_data.get("prob", 0) >= 50,
+            "position": None,
+            "status": "third",
+            "avg_rank": mc_country_data.get("avg_rank"),
+            "prob": mc_country_data.get("prob"),
+        }
+        # Already-advancing teams (top 2 in group) carry no 3rd-place rank;
+        # mirror that here rather than showing a misleading median rank.
+        if mc_country_data.get("note") == "Already advancing (top 2 in group)":
+            likely_data = {"rank": None, "adv": True, "position": 1, "status": "top2", "avg_rank": None, "prob": 100.0}
+        elif mc_country_data.get("note") == "Eliminated":
+            likely_data = {"rank": None, "adv": False, "position": None, "status": "eliminated", "avg_rank": None, "prob": 0.0}
+    else:
+        l, lpos = build("likely")
+        lr = country_rank(l)
+        likely_data = scenario_data(lr, lpos)
+
     return {
         "best": scenario_data(br, bpos),
         "worst": scenario_data(wr, wpos),
-        "likely": scenario_data(lr, lpos),
+        "likely": likely_data,
     }
 
 
@@ -1141,7 +1236,7 @@ def api_data():
     mc_conditional = mc_full.get("_conditional", {})
 
     SIM_MODE = req_mode
-    scenarios = compute_scenarios(standings, matches, country)
+    scenarios = compute_scenarios(standings, matches, country, mc)
 
     country_prob = mc.get("prob", 0)
     key_all = [m for m in matches if m.get("status") != "finished"]
