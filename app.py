@@ -811,29 +811,7 @@ def compute_criticality(match: dict, standings: dict, country: str = "South Kore
     if advance_prob is not None and (advance_prob >= 100 or advance_prob <= 0):
         return "grey"
 
-    # Prefer MC-derived severity: the probability swing across outcomes is a
-    # much more reliable signal than static points/GD thresholds, especially
-    # for out-of-group matches where the threshold logic has poor visibility.
-    if mc_conditional and match.get("id") is not None:
-        cond = mc_conditional.get(str(match["id"]))
-        if cond:
-            pcts = [
-                bucket.get("advance_pct", {}).get(country)
-                for bucket in cond.values()
-                if bucket.get("n_sims", 0) >= 500  # ignore low-sample buckets
-            ]
-            pcts = [p for p in pcts if p is not None]
-            if len(pcts) >= 2:
-                swing = max(pcts) - min(pcts)
-                if swing >= 20:
-                    return "red"
-                elif swing >= 8:
-                    return "orange"
-                elif swing >= 2:
-                    return "yellow"
-                else:
-                    return "grey"
-
+    # Resolve country position up front so every branch can use it.
     country_group = None
     country_pos = None
     for gname, tbl in standings.items():
@@ -849,9 +827,38 @@ def compute_criticality(match: dict, standings: dict, country: str = "South Kore
         return "grey"
 
     match_group = match.get("group", "")
+    is_own_match = country in (match.get("team1", ""), match.get("team2", ""))
+    is_same_group = match_group == country_group
 
-    if match_group == country_group:
-        if country in (match["team1"], match["team2"]):
+    # MC-derived severity: probability swing across outcomes is a reliable signal.
+    # For out-of-group matches with tiny swing, fall through to the structural
+    # H2H-aware check below instead of blindly returning grey.
+    if mc_conditional and match.get("id") is not None:
+        cond = mc_conditional.get(str(match["id"]))
+        if cond:
+            pcts = [
+                bucket.get("advance_pct", {}).get(country)
+                for bucket in cond.values()
+                if bucket.get("n_sims", 0) >= 500
+            ]
+            pcts = [p for p in pcts if p is not None]
+            if len(pcts) >= 2:
+                swing = max(pcts) - min(pcts)
+                if swing >= 20:
+                    return "red"
+                elif swing >= 8:
+                    return "orange"
+                elif swing >= 2:
+                    return "yellow"
+                elif is_same_group or is_own_match:
+                    # In-group swing is diluted by other groups randomness —
+                    # floor at yellow rather than suppressing.
+                    return "yellow"
+                # else: out-of-group tiny swing — fall through to structural check
+
+    # ── In-group logic ──────────────────────────────────────────────────────
+    if is_same_group:
+        if is_own_match:
             return "red"
         if country_pos == 3:
             table = standings.get(match_group, [])
@@ -866,6 +873,7 @@ def compute_criticality(match: dict, standings: dict, country: str = "South Kore
             return "orange"
         return "yellow"
 
+    # ── Out-of-group: only matters when country is sitting 3rd ──────────────
     if country_pos != 3:
         return "grey"
 
@@ -881,6 +889,7 @@ def compute_criticality(match: dict, standings: dict, country: str = "South Kore
     if len(match_table) < 3:
         return "grey"
 
+    # standings is already H2H-sorted, so match_table[2] is the true 3rd.
     current_third = match_table[2]
     t1_row = next((r for r in match_table if r["team"] == match["team1"]), None)
     t2_row = next((r for r in match_table if r["team"] == match["team2"]), None)
@@ -895,11 +904,8 @@ def compute_criticality(match: dict, standings: dict, country: str = "South Kore
         for winner, loser in [(t1_row, t2_row), (t2_row, t1_row)]:
             others = [r for r in match_table if r["team"] not in (match["team1"], match["team2"])]
             projected = sort_group(
-                others + [
-                    {**winner, "pts": winner["pts"] + 3},
-                    {**loser},
-                ],
-                []  # no scorelines available in criticality check; falls back to overall GD
+                others + [{**winner, "pts": winner["pts"] + 3}, {**loser}],
+                []
             )
             if len(projected) >= 3:
                 new_third = projected[2]
@@ -908,10 +914,7 @@ def compute_criticality(match: dict, standings: dict, country: str = "South Kore
                 ):
                     return "orange"
 
-    return "yellow"
-
-
-# ─── WHAT-IF ANALYSIS ──────────────────────────────────────────────────────
+    return "grey"
 
 
 def compute_outcome(standings: dict, match: dict, country: str, outcome: str, score1: int | None = None, score2: int | None = None, all_matches: list[dict] | None = None) -> dict:
@@ -1186,13 +1189,13 @@ def compute_group_outcomes(standings: dict, matches: list[dict], country: str, m
     }
 
 
-def precompute_key_match_outcomes(standings: dict, matches: list[dict], country: str, mc_conditional: dict | None = None) -> list[dict]:
+def precompute_key_match_outcomes(standings: dict, matches: list[dict], country: str, mc_conditional: dict | None = None, all_matches: list[dict] | None = None) -> list[dict]:
     """Pre-compute all three outcomes for every upcoming key match."""
     result = []
     for m in matches:
         if m.get("status") == "finished":
             continue
-        outcome_data = compute_outcomes_for_match(standings, m, country, mc_conditional, all_matches=matches)
+        outcome_data = compute_outcomes_for_match(standings, m, country, mc_conditional, all_matches=all_matches or matches)
         result.append(outcome_data)
     return result
 
@@ -1390,12 +1393,13 @@ def api_data():
             remaining_counts[m["team1"]] = remaining_counts.get(m["team1"], 0) + 1
             remaining_counts[m["team2"]] = remaining_counts.get(m["team2"], 0) + 1
 
-    key_outcomes = precompute_key_match_outcomes(standings, key_upcoming, country, mc_conditional)
-    live_outcomes = precompute_key_match_outcomes(standings, live_raw, country, mc_conditional)
+    key_outcomes = precompute_key_match_outcomes(standings, key_upcoming, country, mc_conditional, all_matches=matches)
+    live_outcomes = precompute_key_match_outcomes(standings, live_raw, country, mc_conditional, all_matches=matches)
 
     severity_map = {str(m["id"]): m["severity"] for m in key_upcoming}
     for ko in key_outcomes:
         ko["severity"] = severity_map.get(str(ko["id"]), "grey")
+    key_outcomes = [ko for ko in key_outcomes if ko.get("severity", "grey") != "grey"]
 
     live_severity_map = {str(m["id"]): m["severity"] for m in live_raw}
     live_minute_map = {str(m["id"]): m.get("live_minute") for m in live_raw}
