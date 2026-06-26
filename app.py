@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-"""
-2026 World Cup Advancement Tracker
-Interactive web dashboard to track any country's chances of advancing
-as one of the 8 best third-placed teams from 12 groups.
-
-Usage:
-  python3 korea_wc_tracker.py
-  → http://localhost:8080
-"""
 
 import hashlib
 import itertools
@@ -27,7 +18,8 @@ from flask import Flask, jsonify, request, render_template
 
 API_BASE = "https://worldcup26.ir"
 API_HEADERS = {"Authorization": "Bearer demo"}
-REFRESH_SECS = 30
+REFRESH_SECS_LIVE = 30        # poll interval when any match is live
+REFRESH_SECS_IDLE = 3600      # poll interval when no matches are live
 MONTE_CARLO_ITERATIONS = 50_000
 ADVANCE_SLOTS = 8
 PORT = 8080
@@ -60,6 +52,7 @@ def _rebuild_elo(standings: dict[str, list[dict]]) -> None:
 _team_cache: dict[str, str] = {}
 _last_fetch: dict[str, Any] = {}
 _last_fetch_time = 0.0
+_last_api_updated: str = ""  # raw updatedAt string from last successful fetch
 
 
 def _load_teams() -> dict[str, str]:
@@ -84,12 +77,19 @@ def _get(path: str) -> dict:
         return {}
 
 
-def fetch_all_data() -> dict[str, Any]:
-    global _last_fetch_time
+def fetch_all_data(force: bool = False) -> dict[str, Any]:
+    global _last_fetch_time, _last_api_updated
     try:
         teams = _load_teams()
         raw_groups = _get("get/groups")
         raw_games = _get("get/games")
+
+        ts = raw_groups.get("updatedAt") or raw_groups.get("_updated")
+
+        # Skip full reparse if server data hasn't changed
+        if not force and ts and ts == _last_api_updated and _last_fetch:
+            _last_fetch_time = time.time()
+            return _last_fetch
 
         standings: dict[str, list[dict]] = {}
         all_teams_set: set[str] = set()
@@ -154,13 +154,18 @@ def fetch_all_data() -> dict[str, Any]:
 
         _rebuild_elo(standings)
         _last_fetch_time = time.time()
-        return {
+        if ts:
+            _last_api_updated = ts
+        result = {
             "standings": standings,
             "all_teams": sorted(all_teams_set),
             "matches": group_matches,
             "all_matches": all_matches,
             "updated": updated_ts or time.time(),
         }
+        _last_fetch.clear()
+        _last_fetch.update(result)
+        return result
     except Exception as e:
         return _last_fetch
 
@@ -1131,12 +1136,18 @@ def refresh_data():
 # ─── MAIN ────────────────────────────────────────────────────────────────────
 
 def _bg_refresh():
+    consecutive_errors = 0
     while True:
-        time.sleep(REFRESH_SECS)
+        matches = _LATEST_DATA.get("all_matches", _LATEST_DATA.get("matches", []))
+        has_live = any(m.get("status") == "live" for m in matches)
+        base_sleep = REFRESH_SECS_LIVE if has_live else REFRESH_SECS_IDLE
+        sleep_secs = min(base_sleep * (2 ** consecutive_errors), REFRESH_SECS_IDLE)
+        time.sleep(sleep_secs)
         try:
             refresh_data()
+            consecutive_errors = 0
         except Exception:
-            pass
+            consecutive_errors += 1
 
 
 def _warm_mc_cache():

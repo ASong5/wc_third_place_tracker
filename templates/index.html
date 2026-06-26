@@ -567,9 +567,50 @@ document.addEventListener("mouseover", function(e) {
     if (r.right > vw - 120) el.classList.add("tip-right");
 });
 
+const POLL_LIVE_MS   = 30_000;   // 30s when a match is live
+const POLL_IDLE_MS   = 3_600_000; // 1h when nothing is live
+const POLL_STATUS_MS = 30_000;    // how often to ping /api/status
+
+let _pollTimer = null;
+let _lastDataUpdated = null; // track server's `updated` timestamp
+let _consecutiveErrors = 0;
+
+// Lightweight check: is any match live right now?
+async function pollStatus() {
+    try {
+        const r = await fetch("/api/status");
+        if (!r.ok) throw new Error(r.status);
+        const s = await r.json();
+        _consecutiveErrors = 0;
+
+        // Only fetch heavy data if server has new data or a match just went live
+        const serverUpdated = s.updated;
+        const isLive = s.live;
+        const dataIsStale = serverUpdated !== _lastDataUpdated;
+
+        if (dataIsStale || isLive) {
+            await fetchData();
+            _lastDataUpdated = serverUpdated;
+        }
+
+        scheduleDataPoll(isLive ? POLL_LIVE_MS : POLL_IDLE_MS);
+    } catch(e) {
+        _consecutiveErrors++;
+        // Exponential backoff capped at 5 minutes
+        const backoff = Math.min(300_000, POLL_STATUS_MS * Math.pow(2, _consecutiveErrors - 1));
+        scheduleDataPoll(backoff);
+    }
+}
+
+function scheduleDataPoll(delayMs) {
+    clearTimeout(_pollTimer);
+    _pollTimer = setTimeout(pollStatus, delayMs);
+}
+
 fetchTeams();
-fetchData();
-setInterval(fetchData, 30000);
+fetchData().then(() => {
+    scheduleDataPoll(POLL_STATUS_MS);
+});
 </script>
 </body>
 </html>
