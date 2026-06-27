@@ -575,10 +575,20 @@ async function runSimulate() {
             resultEl.innerHTML = '<div style="color:#666;margin-top:8px">No data to simulate</div>';
             return;
         }
-        const countryRank = data.country_rank || "?";
         const advText = data.is_advancing
             ? '<span class="tag tag-green">✅ Advances</span>'
             : '<span class="tag tag-red">❌ Eliminated</span>';
+        const groupFinish = data.country_group_finish;
+        let rankLabel;
+        if (groupFinish === 1 || groupFinish === 2) {
+            rankLabel = `Advances from top ${groupFinish}`;
+        } else if (data.country_rank) {
+            rankLabel = `Rank ${data.country_rank}/12`;
+        } else if (groupFinish === 4) {
+            rankLabel = "Not in contention";
+        } else {
+            rankLabel = "?";
+        }
         const rows = data.standings.map((t, i) => {
             const rank = i + 1;
             const isCountry = t.team === currentCountry;
@@ -602,7 +612,7 @@ async function runSimulate() {
         }).join("");
         resultEl.innerHTML = `<div style="margin-top:12px;padding:8px;background:#1a1a2e;border-radius:6px;border:1px solid #2a2a4a">
             <div style="margin-bottom:8px;font-size:0.85rem">
-                <span style="color:#888">Projected:</span> <strong>${escapeHtml(currentCountry)}</strong> → Rank <strong>${countryRank}/12</strong> ${advText}
+                <span style="color:#888">Projected:</span> <strong>${escapeHtml(currentCountry)}</strong> → <strong>${rankLabel}</strong> ${advText}
             </div>
             ${matches.length ? `<details style="margin-top:8px"${wasOpen ? ' open' : ''}><summary style="color:#888;font-size:0.8rem;cursor:pointer">Match Results (${matches.length})</summary><div style="margin-top:4px">${matchHtml}</div></details>` : ''}
             <table class="projected-table" style="margin-top:8px">

@@ -1220,9 +1220,13 @@ def simulate_all(standings: dict, matches: list[dict], country: str) -> dict:
     locked = {g for g, tbl in standings.items() if all(r["p"] >= 3 for r in tbl)}
     all_sampled: dict[str, str] = {}
     all_thirds = []
+    country_group_finish: int | None = None  # 1-based position within its own group, this sim
 
     for gname, table in standings.items():
         if gname in locked:
+            for i, row in enumerate(table):
+                if row["team"] == country:
+                    country_group_finish = i + 1
             if len(table) >= 3:
                 third = dict(table[2])
                 third["group"] = gname
@@ -1260,6 +1264,9 @@ def simulate_all(standings: dict, matches: list[dict], country: str) -> dict:
                     else:
                         row["l"] += 1
         final = sort_group(list(cur_tbl.values()), sim_match_results)
+        for i, row in enumerate(final):
+            if row["team"] == country:
+                country_group_finish = i + 1
         if len(final) >= 3:
             third = dict(final[2])
             third["group"] = gname
@@ -1267,11 +1274,25 @@ def simulate_all(standings: dict, matches: list[dict], country: str) -> dict:
 
     all_thirds.sort(key=rank_key)
 
-    country_rank = None
+    third_place_rank = None
     for i, t in enumerate(all_thirds):
         if t["team"] == country:
-            country_rank = i + 1
+            third_place_rank = i + 1
             break
+
+    if country_group_finish is not None and country_group_finish <= 2:
+        # Finished 1st or 2nd in its group: advances automatically, no
+        # third-place ranking needed/applicable.
+        country_rank = country_group_finish
+        is_advancing = True
+    elif third_place_rank is not None:
+        # Finished 3rd: advancement depends on cross-group third-place rank.
+        country_rank = third_place_rank
+        is_advancing = third_place_rank <= ADVANCE_SLOTS
+    else:
+        # Finished 4th (or country/group not found): eliminated.
+        country_rank = None
+        is_advancing = False
 
     match_results = []
     for m in matches:
@@ -1302,7 +1323,8 @@ def simulate_all(standings: dict, matches: list[dict], country: str) -> dict:
     return {
         "standings": all_thirds,
         "country_rank": country_rank,
-        "is_advancing": country_rank is not None and country_rank <= ADVANCE_SLOTS,
+        "country_group_finish": country_group_finish,
+        "is_advancing": is_advancing,
         "match_results": match_results,
     }
 
