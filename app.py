@@ -696,63 +696,113 @@ def compute_scenarios(standings: dict, matches: list[dict], country: str = "Sout
         third, _ = simulate_group(table, remaining, od, gname)
         return (third, od)
 
-    def extreme_country(table, remaining, maximize, gname=""):
-        outcomes = ["1", "X", "2"]
-        best_od, best_pos, best_third = None, None, None
-        for combo in itertools.product(outcomes, repeat=len(remaining)):
-            od = {str(m["id"]): res for m, res in zip(remaining, combo)}
-            third, final = simulate_group(table, remaining, od, gname)
-            pos = next((i + 1 for i, r in enumerate(final) if r["team"] == country), None)
-            if pos is None:
-                continue
-            if best_pos is None or (maximize and pos > best_pos) or (not maximize and pos < best_pos):
-                best_od, best_pos, best_third = od, pos, third
-        return best_od, best_third, best_pos
-
-    def simulate_country_group(strat, table, rem, gname=""):
-        if strat == "best":
-            od, third, pos = extreme_country(table, rem, False, gname)
-        elif strat == "worst":
-            od, third, pos = extreme_country(table, rem, True, gname)
-        else:
-            third, od = likely_group(table, rem, gname)
-            _, final = simulate_group(table, rem, od, gname)
-            pos = next((i + 1 for i, r in enumerate(final) if r["team"] == country), None)
-        return od, third, pos
-
     def build(strat):
-        thirds = []
-        country_pos = None
+        """Assemble the best/worst/likely scenario for `country`.
+
+        For best/worst we want to optimize `country`'s final rank among all
+        12 third-place teams — not just their position within their own group.
+        We do this in two passes:
+
+        Pass 1: fix all *other* groups to their best/worst-for-country thirds
+                (weakest thirds for best case, strongest for worst case).
+        Pass 2: enumerate all outcome combos for country's own group and pick
+                the one that produces the best/worst rank among the full
+                assembled thirds list.
+
+        This fixes the old approach where `extreme_country` optimized group
+        position (1st/2nd/3rd/4th) rather than third-place rank, which caused
+        nonsensical scenarios like "worst case: rank 8, advances".
+        """
+        # --- Pass 1: resolve all other groups ---
+        other_thirds: list[dict] = []
+        locked_thirds: list[dict] = []
+        locked_country_pos: int | None = None
+
         for gname, table in standings.items():
+            if gname == country_group:
+                continue
             if gname in locked:
                 if len(table) >= 3:
-                    thirds.append(table[2])
-                if gname == country_group:
-                    for i, r in enumerate(table):
-                        if r["team"] == country:
-                            country_pos = i + 1
-                            break
+                    t = dict(table[2]); t["group"] = gname
+                    locked_thirds.append(t)
                 continue
             rem = remaining_by_group.get(gname, [])
-            if gname == country_group:
-                od, third, country_pos = simulate_country_group(strat, table, rem, gname)
-                if third:
-                    third["group"] = gname
-                    thirds.append(third)
+            if strat == "best":
+                res = extreme_third(table, rem, False, gname)   # weakest third = good for us
+            elif strat == "worst":
+                res = extreme_third(table, rem, True, gname)    # strongest third = bad for us
             else:
-                if strat == "best":
-                    res = extreme_third(table, rem, False, gname)
-                elif strat == "worst":
-                    res = extreme_third(table, rem, True, gname)
-                else:
-                    res = likely_group(table, rem, gname)
-                if res:
-                    third, _ = res
-                    if third:
-                        third["group"] = gname
-                        thirds.append(third)
-        thirds.sort(key=rank_key)
-        return thirds, country_pos
+                res = likely_group(table, rem, gname)
+            if res:
+                third, _ = res
+                if third:
+                    t = dict(third); t["group"] = gname
+                    other_thirds.append(t)
+
+        # Locked country group: position is already determined
+        if country_group in locked:
+            table = standings[country_group]
+            for i, r in enumerate(table):
+                if r["team"] == country:
+                    locked_country_pos = i + 1
+                    break
+            all_thirds = locked_thirds + other_thirds
+            if len(standings.get(country_group, [])) >= 3:
+                t = dict(standings[country_group][2]); t["group"] = country_group
+                all_thirds.append(t)
+            all_thirds.sort(key=rank_key)
+            return all_thirds, locked_country_pos
+
+        # --- Pass 2: enumerate country's own group outcomes ---
+        table = standings[country_group]
+        rem = remaining_by_group.get(country_group, [])
+
+        if strat == "likely":
+            third, od = likely_group(table, rem, country_group)
+            _, final = simulate_group(table, rem, od, country_group)
+            country_pos = next((i + 1 for i, r in enumerate(final) if r["team"] == country), None)
+            all_thirds = locked_thirds + other_thirds
+            if third:
+                t = dict(third); t["group"] = country_group
+                all_thirds.append(t)
+            all_thirds.sort(key=rank_key)
+            return all_thirds, country_pos
+
+        outcomes = ["1", "X", "2"]
+        best_thirds: list[dict] = []
+        best_country_pos: int | None = None
+        best_rank: int | None = None
+
+        for combo in itertools.product(outcomes, repeat=len(rem)):
+            od = {str(m["id"]): res for m, res in zip(rem, combo)}
+            third, final = simulate_group(table, rem, od, country_group)
+            country_pos = next((i + 1 for i, r in enumerate(final) if r["team"] == country), None)
+
+            # Assemble candidate full thirds list
+            candidate = list(locked_thirds) + list(other_thirds)
+            if third:
+                t = dict(third); t["group"] = country_group
+                candidate.append(t)
+            candidate.sort(key=rank_key)
+
+            # Find country's rank among thirds (None if they finished top-2 or 4th)
+            if country_pos is not None and country_pos <= 2:
+                # Top-2 finish: always better than any third-place rank
+                c_rank = 0  # sentinel: ranks above all thirds
+            else:
+                c_rank = next((i + 1 for i, t in enumerate(candidate) if t["team"] == country), None)
+                if c_rank is None:
+                    # Country not in thirds (finished 4th): worst possible
+                    c_rank = 999
+
+            if best_rank is None \
+                    or (strat == "best" and c_rank < best_rank) \
+                    or (strat == "worst" and c_rank > best_rank):
+                best_rank = c_rank
+                best_thirds = candidate
+                best_country_pos = country_pos
+
+        return best_thirds, best_country_pos
 
     def country_rank(thirds):
         for i, t in enumerate(thirds):
@@ -924,10 +974,39 @@ def compute_outcome(standings: dict, match: dict, country: str, outcome: str, sc
              for m in (all_matches or [])
              if m.get("status") == "finished" and m.get("group") == group]
     new_table = apply_match_outcome(table, match, outcome, score1, score2, prior)
-    new_standings = {**standings, group: new_table}
+
+    # Apply the most likely outcome of any OTHER still-unplayed matches in the
+    # same group before reading the third-place standings.  Without this,
+    # evaluating e.g. "Croatia wins" in Group L ignores England vs Panama, so
+    # sort_group sees an incomplete table and mis-identifies who finishes 3rd.
+    # Simultaneous matches in the same group are the most common source of
+    # misleading rank labels — the MC handles them correctly because it samples
+    # all matches together, but the static snapshot here only applied one.
+    sibling_matches = [
+        m for m in (all_matches or [])
+        if m.get("group") == group
+        and m.get("status") != "finished"
+        and str(m.get("id")) != str(match.get("id"))
+    ]
+    sibling_prior = list(prior)
+    cur_table = new_table
+    for sib in sibling_matches:
+        r1, r2 = rating(sib["team1"]), rating(sib["team2"])
+        pa, pd, pb = elo_prob(r1, r2)
+        if pa >= pd and pa >= pb:
+            sib_out = "1"
+        elif pb >= pa and pb >= pd:
+            sib_out = "2"
+        else:
+            sib_out = "X"
+        g1s, g2s = typical_score(sib_out, r1, r2)
+        sibling_prior.append({"team1": sib["team1"], "team2": sib["team2"], "score": [g1s, g2s]})
+        cur_table = apply_match_outcome(cur_table, sib, sib_out, g1s, g2s, sibling_prior)
+
+    new_standings = {**standings, group: cur_table}
     new_thirds = get_third_placed(new_standings)
     tr = next((i + 1 for i, t in enumerate(new_thirds) if t["team"] == country), None)
-    pos = next((i + 1 for i, r in enumerate(new_table) if r["team"] == country), None)
+    pos = next((i + 1 for i, r in enumerate(cur_table) if r["team"] == country), None)
     advancing = (pos is not None and pos <= 2) or (tr is not None and tr <= ADVANCE_SLOTS)
     g1, g2 = (score1, score2) if score1 is not None else typical_score(outcome, rating(match["team1"]), rating(match["team2"]))
     return {"country_position": pos, "third_place_rank": tr, "advancing": advancing, "score": [g1, g2]}
