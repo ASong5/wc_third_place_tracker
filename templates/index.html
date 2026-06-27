@@ -326,7 +326,8 @@ function renderLive(data) {
 function outcomeRankHtml(res) {
     if (!res) return '<span class="outcome-rank" style="color:#555">—</span>';
     if (res.country_position !== null && res.country_position <= 2) {
-        return `<span class="outcome-rank top2">Advances (${res.country_position}st/2nd)</span>`;
+        const ord = res.country_position === 1 ? "1st" : "2nd";
+        return `<span class="outcome-rank top2">Advances (${ord}/2nd)</span>`;
     }
     const rank = res.third_place_rank;
     const adv = res.advancing;
@@ -383,7 +384,7 @@ function simBarHtml(res) {
         </div>`;
 }
 
-function renderMatchOutcomePanel(m) {
+function renderMatchOutcomePanel(m, hasLiveSibling) {
     const t1 = escapeHtml(m.team1);
     const t2 = escapeHtml(m.team2);
     const s1 = m["1"], sX = m["X"], s2 = m["2"];
@@ -401,6 +402,12 @@ function renderMatchOutcomePanel(m) {
             ${outcomeRankHtml(r.res)}
             ${simBarHtml(r.res)}
         </div>`).join("");
+
+    const siblingNote = hasLiveSibling
+        ? `<div class="outcome-sibling-note" style="font-size:0.72rem;color:#888;padding:4px 0 8px;border-bottom:1px solid #2a2a4a;margin-bottom:4px">
+            Another match in this group is live too. The Rank/Eliminated label below assumes that match stays exactly as it is now — the % adv. bar underneath it already accounts for how that match could still go.
+           </div>`
+        : "";
 
     let gdHtml = "";
     if (m.gd && m.gd.length) {
@@ -438,7 +445,7 @@ function renderMatchOutcomePanel(m) {
         </div>`;
     }
 
-    return `<div>${rowsHtml}${gdHtml}</div>`;
+    return `<div>${siblingNote}${rowsHtml}${gdHtml}</div>`;
 }
 
 function renderKey(data) {
@@ -462,7 +469,17 @@ function renderMatchList(matches, elId, emptyMsg, isLiveList) {
         return;
     }
     const badgeCls = {red:"badge-red", orange:"badge-orange", yellow:"badge-yellow", grey:"badge-grey"};
+    // When two matches in the same group are live at once, each one's
+    // snapshot rank/elimination label is computed by freezing the *other*
+    // live match at its current (not-yet-final) score. That's a reasonable
+    // simplification for finished matches, but misleading for a live one —
+    // so flag those cases to soften the label rather than state it flatly.
+    const liveGroupCounts = {};
+    if (isLiveList) {
+        keys.forEach(m => { liveGroupCounts[m.group] = (liveGroupCounts[m.group] || 0) + 1; });
+    }
     el.innerHTML = keys.map(m => {
+        const hasLiveSibling = isLiveList && (liveGroupCounts[m.group] || 0) > 1;
         const id = m.id;
         const isExpanded = expandedPanels.has(id);
         const dateStr = m.date ? `<span style="color:#666;font-size:0.75rem">${m.date.slice(0,5)}</span> ` : "";
@@ -482,7 +499,7 @@ function renderMatchList(matches, elId, emptyMsg, isLiveList) {
                 <span class="collapse-toggle" id="toggle-${id}">${isExpanded ? '▼' : '▶'}</span>
             </div>
             <div class="outcome-panel${isExpanded ? '' : ' collapsed'}" id="outcome-panel-${id}">
-                ${renderMatchOutcomePanel(m)}
+                ${renderMatchOutcomePanel(m, hasLiveSibling)}
             </div>
         </div>`;
     }).join("");
